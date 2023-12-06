@@ -15,16 +15,35 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+```{r 读取数据}
+raw_data<-read.table("D:\\1大三\\R语言\\时序分析\\stock.csv",header=TRUE,sep=",")
+summary(raw_data)#检查数据类型
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
+```{r 数据处理：发现有些数据类型不对，所以进行处理 首先处理公司和时间}
+data<-data.frame(matrix(nrow = nrow(raw_data), ncol=ncol(raw_data)))#新建一个空的数据框，用于存储处理后的数据
+colnames(data) <- colnames(raw_data)
+data$Company<-as.factor(raw_data$Company)#把公司代码转为因子类型
+raw_data$Date<-gsub("-", "/", raw_data$Date)#把这一列的-都替换成/
+data$Date<-as.Date(raw_data$Date, format = "%m/%d/%Y")#在表格中的存储样式是：07/17/2023
+summary(data$Date)#检查是否有缺失值
+cat("\n")
+summary(data$Company)
+```
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r 处理4列价格}
+raw_data$Close.Last<-gsub("\\$", "", raw_data$Close.Last)#把这一列的$都删掉
+data$Close.Last<-as.numeric(raw_data$Close.Last)#转换类型
+raw_data$Open<-gsub("\\$", "", raw_data$Open)
+data$Open<-as.numeric(raw_data$Open)
+raw_data$High<-gsub("\\$", "", raw_data$High)
+data$High<-as.numeric(raw_data$High)
+raw_data$Low<-gsub("\\$", "", raw_data$Low)
+data$Low<-as.numeric(raw_data$Low)
+
+data$Volume<-raw_data$Volume
+summary(data)#再次检查数据类型以及检查是否有空值
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
