@@ -43,7 +43,27 @@ raw_data$Low<-gsub("\\$", "", raw_data$Low)
 data$Low<-as.numeric(raw_data$Low)
 
 data$Volume<-raw_data$Volume
+data<-data[order(data$Date),]#按日期排序
 summary(data)#再次检查数据类型以及检查是否有空值
+```
+
+```{r}
+library(ggplot2)
+library(pacman)
+data_aapl<-subset(data,Company=="AAPL")
+# 创建一个连续时间序列
+end_date <- tail(data$Date,n=1)
+start_date <- head(data$Date,n=1)
+all_dates <- seq(start_date, end_date, by = "day")
+ts_data_aapl <- ts(data = NA, start = start_date, end = end_date, frequency = 1)
+# 将实际数据填充到时间序列中
+date_indices <- match(data_aapl$Date, all_dates)
+ts_data_aapl[date_indices] <- data_aapl$Close.Last 
+#ts_data_aapl
+summary(ts_data_aapl)
+#head(ts_data_aapl)
+plot(ts_data_aapl)
+
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
