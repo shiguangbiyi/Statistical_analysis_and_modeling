@@ -47,10 +47,7 @@ data<-data[order(data$Date),]#按日期排序
 summary(data)#再次检查数据类型以及检查是否有空值
 ```
 
-```{r}
-library(ggplot2)
-library(pacman)
-library(lubridate)
+```{r 提取各个公司的数据，转为ts类型}
 # 创建一个连续时间序列
 end_date <- tail(data$Date,n=1)
 start_date <- head(data$Date,n=1)
@@ -89,11 +86,14 @@ for(i in 1:length(company_data)){
 
 ```
 ```{r 清除工作空间的多余内容}
-rm(data_aaply,data_only12,data_OTHER,p,WVS,V23,V2A,zoo_data)
+#rm(data_aaply,data_only12,data_OTHER,p,WVS,V23,V2A,zoo_data)
+#remove.packages("htmltools")
+install.packages("htmltools", version = "0.5.7")
+
 ```
 
 
-```{r}
+```{r 画收盘价的图}
 library(ggplot2)
 library(pacman)
 library(lubridate)
@@ -108,9 +108,15 @@ for(i in 2:length(ts_list))
 }
 
 axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
-
-
-
+legend_text <- c("AAPL", "AMD","AMEN","CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA")  # 自定义图例文本
+legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  # 添加图例，并指定对应的颜色# 添加图例，说明每个颜色对应的公司
+```
+```{r 对每个公司画K线图}
+library(plotly)
+plot_ly(company_data[[1]],x=~Date,type="candlestick", open=~Open,close=~Close.Last,
+        high=~High,low=~Low,
+        increasing=list(line=list(color="red")),
+        decreasing=list(line=list(color="green")))
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
