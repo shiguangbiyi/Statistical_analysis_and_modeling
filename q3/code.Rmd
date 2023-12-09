@@ -120,3 +120,15 @@ plot_ly(company_data[[1]],x=~Date,type="candlestick", open=~Open,close=~Close.La
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r 对Volume这个属性画柱形图}
+library(ggplot2)
+ggplot(subset(data,Date>=as.Date("2023-06-01")), aes(x = Date, y = Volume, fill = Company)) +
+  geom_bar(stat = "identity", position = "stack")+
+  scale_fill_manual(values = fig1_col)
+#如果要获得某个时间点之后的数据：Date>=as.Date("2023-01-01"),aes(x = Date, y = Volume, fill = Company)
+#如果要获得同一天的各个公司比较：aes(x = Company, y = Volume, fill = Company)
+```
+```{r 做季节性分析}
+
+```
+
