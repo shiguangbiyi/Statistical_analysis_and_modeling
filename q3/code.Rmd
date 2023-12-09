@@ -50,22 +50,66 @@ summary(data)#再次检查数据类型以及检查是否有空值
 ```{r}
 library(ggplot2)
 library(pacman)
-install.packages("lubridate")
 library(lubridate)
-data_aapl<-subset(data,Company=="AAPL")
 # 创建一个连续时间序列
 end_date <- tail(data$Date,n=1)
 start_date <- head(data$Date,n=1)
 all_dates <- seq(start_date, end_date, by = "day")
-ts_data_aapl <- ts(data = NA, start = start_date, end = end_date, frequency = 1)
-# 将实际数据填充到时间序列中
-date_indices <- match(data_aapl$Date, all_dates)
-ts_data_aapl[date_indices] <- data_aapl$Close.Last 
-#ts_data_aapl
-summary(ts_data_aapl)
-#head(ts_data_aapl)
-plot(ts_data_aapl, xaxt = "n")
-axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))
+#单独取出各个公司的数据进行分析
+data_aapl<-subset(data,Company=="AAPL")
+data_amd<-subset(data,Company=="AMD")
+data_AMZN<-subset(data,Company=="AMZN")
+data_CSCO<-subset(data,Company=="CSCO")
+data_META<-subset(data,Company=="META")
+data_MSFT<-subset(data,Company=="MSFT")
+data_NFLX<-subset(data,Company=="NFLX")
+data_QCOM<-subset(data,Company=="QCOM")
+data_SBUX<-subset(data,Company=="SBUX")
+data_TSLA<-subset(data,Company=="TSLA")
+company_data <- list(
+  data_aapl,
+  data_amd,
+  data_AMZN,
+  data_CSCO,
+  data_META,
+  data_MSFT,
+  data_NFLX,
+  data_QCOM,
+  data_SBUX,
+  data_TSLA
+)
+#把各公司的数据转为ts
+ts_list<-list()
+for(i in 1:length(company_data)){
+   temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
+   date_indices <- match(company_data[[i]]$Date, all_dates)
+   temp_ts[date_indices] <- company_data[[i]]$Close.Last#注意这里只把收盘价填入了ts
+   ts_list[[length(ts_list) + 1]]<-temp_ts
+}
+
+```
+```{r 清除工作空间的多余内容}
+rm(data_aaply,data_only12,data_OTHER,p,WVS,V23,V2A,zoo_data)
+```
+
+
+```{r}
+library(ggplot2)
+library(pacman)
+library(lubridate)
+library(RColorBrewer)
+fig1_col <- brewer.pal(n = 10, name = "Paired")
+#参考自：https://zhuanlan.zhihu.com/p/35366657
+#画图
+plot(ts_list[[1]], xaxt = "n", main = "各公司的收盘价随时间变化图", xlab = "时间", ylab = "收盘价",col=fig1_col[1],ylim = c(0, 800))#画ts，但先不画出坐标轴
+for(i in 2:length(ts_list))
+{
+  lines(ts_list[[i]], xaxt = "n",col=fig1_col[i])
+}
+
+axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
+
+
 
 ```
 
