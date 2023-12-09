@@ -9,18 +9,13 @@ output: word_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
+读取数据
 ```{r 读取数据}
-raw_data<-read.table("D:\\1大三\\R语言\\时序分析\\stock.csv",header=TRUE,sep=",")
+raw_data<-read.table("./stock.csv",header=TRUE,sep=",")
 summary(raw_data)#检查数据类型
 ```
 
-
+数据处理
 ```{r 数据处理：发现有些数据类型不对，所以进行处理 首先处理公司和时间}
 data<-data.frame(matrix(nrow = nrow(raw_data), ncol=ncol(raw_data)))#新建一个空的数据框，用于存储处理后的数据
 colnames(data) <- colnames(raw_data)
@@ -46,15 +41,16 @@ data$Volume<-raw_data$Volume
 data<-data[order(data$Date),]#按日期排序
 summary(data)#再次检查数据类型以及检查是否有空值
 ```
-
+将各公司的数据全部转换为时间序列类型，以便之后更好地做数据处理
 ```{r 提取各个公司的数据，转为ts类型}
 # 创建一个连续时间序列
 end_date <- tail(data$Date,n=1)
 start_date <- head(data$Date,n=1)
 all_dates <- seq(start_date, end_date, by = "day")
+
 #单独取出各个公司的数据进行分析
-data_aapl<-subset(data,Company=="AAPL")
-data_amd<-subset(data,Company=="AMD")
+data_AAPL<-subset(data,Company=="AAPL")
+data_AMD<-subset(data,Company=="AMD")
 data_AMZN<-subset(data,Company=="AMZN")
 data_CSCO<-subset(data,Company=="CSCO")
 data_META<-subset(data,Company=="META")
@@ -64,8 +60,8 @@ data_QCOM<-subset(data,Company=="QCOM")
 data_SBUX<-subset(data,Company=="SBUX")
 data_TSLA<-subset(data,Company=="TSLA")
 company_data <- list(
-  data_aapl,
-  data_amd,
+  data_AAPL,
+  data_AMD,
   data_AMZN,
   data_CSCO,
   data_META,
@@ -80,11 +76,21 @@ ts_list<-list()
 for(i in 1:length(company_data)){
    temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
    date_indices <- match(company_data[[i]]$Date, all_dates)
-   temp_ts[date_indices] <- company_data[[i]]$Close.Last#注意这里只把收盘价填入了ts
-   ts_list[[length(ts_list) + 1]]<-temp_ts
+   
+   # 将列全部修改为时间序列
+   for (col_name in names(company_data[[i]])) {
+      # 排除日期列
+      if (col_name != "Date") {
+         temp_ts[date_indices] <- company_data[[i]][, col_name]
+         ts_list[[length(ts_list) + 1]] <- temp_ts
+      }
+   }
+# temp_ts[date_indices] <- company_data[[i]]$Close.Last#注意这里只把收盘价填入了ts
+# ts_list[[length(ts_list) + 1]]<-temp_ts
 }
 
 ```
+
 ```{r 清除工作空间的多余内容}
 #rm(data_aaply,data_only12,data_OTHER,p,WVS,V23,V2A,zoo_data)
 #remove.packages("htmltools")
@@ -92,7 +98,16 @@ install.packages("htmltools", version = "0.5.7")
 
 ```
 
+初步分析
+为了后期更好的建模，首先使用可视化手段对数据进行初步分析。
+```{r 下载需要的包}
+#install.packages("pacman")
+#install.packages("lubridate")
+#install.packages("RColorBrewer")
+#install.packages("plotly")
+```
 
+这个部分可以不要？？
 ```{r 画收盘价的图}
 library(ggplot2)
 library(pacman)
@@ -109,8 +124,11 @@ for(i in 2:length(ts_list))
 
 axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
 legend_text <- c("AAPL", "AMD","AMEN","CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA")  # 自定义图例文本
-legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  # 添加图例，并指定对应的颜色# 添加图例，说明每个颜色对应的公司
+legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  
+# 添加图例，并指定对应的颜色# 添加图例，说明每个颜色对应的公司
+# 图例太大了，可能需要做相应的调整
 ```
+
 ```{r 对每个公司画K线图}
 library(plotly)
 plot_ly(company_data[[1]],x=~Date,type="candlestick", open=~Open,close=~Close.Last,
@@ -130,5 +148,61 @@ ggplot(subset(data,Date>=as.Date("2023-06-01")), aes(x = Date, y = Volume, fill 
 ```
 ```{r 做季节性分析}
 
+```
+
+
+相关性分析。
+对收盘价进行相关性分析的意义
+```{r 相关性分析——数据处理}
+# 首先检查我们所取的样本中列出的日期下，是否每个公司都有收盘价的值
+library(dplyr)
+
+all_company_close.last <- data %>%
+  group_by(Date) %>%
+  summarise(
+    AAPL = mean(Close.Last[Company == "AAPL"], na.rm = TRUE),
+    AMD = mean(Close.Last[Company == "AMD"], na.rm = TRUE),
+    AMZN = mean(Close.Last[Company == "AMZN"], na.rm = TRUE),
+    CSCO = mean(Close.Last[Company == "CSCO"], na.rm = TRUE),
+    META = mean(Close.Last[Company == "META"], na.rm = TRUE),
+    MSFT = mean(Close.Last[Company == "MSFT"], na.rm = TRUE),
+    NFLX = mean(Close.Last[Company == "NFLX"], na.rm = TRUE),
+    QCOM = mean(Close.Last[Company == "QCOM"], na.rm = TRUE),
+    SBUX = mean(Close.Last[Company == "SBUX"], na.rm = TRUE),
+    TSLA = mean(Close.Last[Company == "TSLA"], na.rm = TRUE),
+    # 添加其他公司的收盘价列，以此类推
+  )
+summary(all_company_close.last)
+```
+由此可知，样本中的日期，每一个公司都有收盘价，可以直接进行相关性分析。
+```{r 相关性分析——数据}
+# 反选，选择除了第一列的其他列
+# install.packages("Hmisc")
+library(Hmisc)
+cor_matrix <- 
+  rcorr(as.matrix(all_company_close.last[, -1]))
+# 查看相关性矩阵和显著性水平
+cor_matrix$r
+cor_matrix$P
+```
+
+```{r 相关性分析——相关性可视化}
+# install.packages("corrplot")
+# require(corrplot)
+# library(corrplot)
+# 参考ppt
+corrplot(cor_matrix$r,method="pie",type="upper",order="hclust",col=c("darkorange","steelblue"),bg="lightgreen")
+
+```
+```{r tseries尝试}
+# 尝试使用tseries绘制K线图、建立时间序列模型
+# install.packages("tseries")
+# library(tseries)
+
+# install.packages("quantmod")
+# library(quantmod)
+
+# 首先将输入数据转为ts数据
+# chartSeries(data_AAPL)
 ```
 
