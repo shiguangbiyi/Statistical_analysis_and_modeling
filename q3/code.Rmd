@@ -92,10 +92,10 @@ for(i in 1:length(company_data)){
 ```
 
 ```{r 清除工作空间的多余内容}
-#rm(data_aaply,data_only12,data_OTHER,p,WVS,V23,V2A,zoo_data)
-#remove.packages("htmltools")
-install.packages("htmltools", version = "0.5.7")
-
+#rm(season_ts)
+#remove.packages("ggplot2")
+#install.packages("htmltools", version = "0.5.7")
+install.packages("ggplot2")
 ```
 
 初步分析
@@ -147,6 +147,17 @@ ggplot(subset(data,Date>=as.Date("2023-06-01")), aes(x = Date, y = Volume, fill 
 #如果要获得同一天的各个公司比较：aes(x = Company, y = Volume, fill = Company)
 ```
 ```{r 做季节性分析}
+library(ggseas)
+library(ggplot2)
+library(forecast)
+library(zoo)
+# 创建时间序列对象，并将频率设置为12（表示每月）
+ts_obj <- na.locf(ts_list[[1]], fromLast = FALSE)
+ts_obj <- ts(data = ts_obj, frequency = 12)
+
+# 绘制季节图
+seasonplot(ts_obj)
+
 
 ```
 
