@@ -1,3 +1,10 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
 # 数据分析/结论
 
 # 将数据导入数据框
@@ -6,11 +13,11 @@ titanic_data <- read.csv("titanic.csv", stringsAsFactors = FALSE)
 # 查看数据框的结构
 str(titanic_data)
 
-head(titanic_data)
-
 # 获取数据框的摘要统计信息
 summary(titanic_data)
+```
 
+```{r}
 # 检查每列的缺失值，包括字符型变量
 sapply(titanic_data, function(x) sum(is.na(x) | x == ""))
 
@@ -31,9 +38,9 @@ tapply(titanic_data$Survived, titanic_data$Sex, mean)
 
 # 使用箱线图等可视化工具分析异常值
 boxplot(titanic_data$Fare, main = "乘客票价箱线图")
+```
 
-
-
+```{r}
 # 数据预处理
 
 # 缺失值处理
@@ -46,12 +53,16 @@ most_common_embarked <- names(which.max(embarked_counts))
 
 # 将 Embarked 列中的空字符串替换为最多的取值
 titanic_data$Embarked[titanic_data$Embarked == ""] <- most_common_embarked
+```
 
+```{r}
 # 将 Cabin 属性中的缺失值替换为 "NC"
 titanic_data$Cabin[titanic_data$Cabin == ""] <- "NC"
 
 sapply(titanic_data, function(x) sum(is.na(x) | x == ""))
+```
 
+```{r}
 # 提取姓名中的称谓作为新的特征
 titanic_data$Title <- gsub('.*,\\s(\\w+)\\..*', '\\1', titanic_data$Name)
 
@@ -60,7 +71,8 @@ title_counts <- table(titanic_data$Title)
 
 # 输出结果
 print(title_counts)
-
+```
+```{r}
 # 查找年龄中的异常值
 age_outliers <- titanic_data$Age < 0 | titanic_data$Age > 120
 
@@ -83,7 +95,11 @@ for (title_category in names(average_age_by_title)) {
   titanic_data$Age[missing_age_indices] <- average_age_rounded
 }
 
+titanic_data$AgeGroup <- cut(titanic_data$Age, breaks = c(-Inf, 18, 30, 50, Inf), labels = c("0-18", "19-30", "31-50", "51+"))
 
+
+```
+```{r}
 # 异常值处理
 # 票价异常值处理
 # 找出票价超过500的行
@@ -103,4 +119,75 @@ print(has_duplicates)
 # 将 "male" 编码为 1，"female" 编码为 0
 titanic_data$Gender <- ifelse(titanic_data$Sex == "male", 1, 0)
 
-head(titanic_data)
+# 使用 label encoding 将 Embarked 列映射为整数
+titanic_data$Embarked_Code <- as.integer(factor(titanic_data$Embarked))
+```
+
+```{r}
+# 将 Cabin 列进行 Label Encoding
+titanic_data$Cabin_Code <- as.integer(factor(titanic_data$Cabin))
+
+# 将 TitleCategory 列进行 Label Encoding
+titanic_data$Title_Code <- as.integer(factor(titanic_data$TitleCategory))
+```
+
+
+```{r}
+# 导入逻辑回归库
+library(glmnet)
+
+# 假设 "Survived" 是目标变量
+# 创建逻辑回归模型
+glm_model <- glm(Survived ~ Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + Embarked_Code + Title_Code, 
+                 family = binomial, 
+                 data = titanic_data)
+summary(glm_model)
+```
+
+```{r}
+glm_model0 <- glm(Survived ~ Age + Gender + Pclass + SibSp + Embarked_Code, family = binomial, data = titanic_data)
+summary(glm_model0)
+```
+```{r}
+boxplot(titanic_data$Pclass ~ titanic_data$Embarked_Code)
+boxplot(titanic_data$Age ~ titanic_data$Embarked_Code)
+boxplot(titanic_data$Gender ~ titanic_data$Embarked_Code)
+boxplot(titanic_data$SibSp ~ titanic_data$Embarked_Code)
+```
+```{r}
+# Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + Embarked_Code + Title_Code
+cor(titanic_data[, c("Embarked_Code", "Age", "Gender", "Pclass", "SibSp", "Parch", "Fare", "Cabin_Code", "Title_Code","Survived")])
+table(titanic_data$Embarked_Code, titanic_data$Pclass)
+
+```
+```{r}
+# 计算存活率
+calculate_survival_rate <- function(data, variable) {
+  survival_table <- table(data[[variable]], data$Survived)
+  survival_rate <- survival_table[, 2] / rowSums(survival_table)
+  return(data.frame(variable_value = names(survival_rate), survival_rate))
+}
+
+# 创建柱状图
+plot_survival_rate <- function(survival_data, title) {
+  barplot(survival_data$survival_rate, names.arg = survival_data$variable_value,
+          ylim = c(0, 1), main = title,
+          xlab = "Variable Value", ylab = "Survival Rate", col = "lightblue", 
+          beside = TRUE)
+}
+
+# 计算并可视化所有属性与存活率的关系
+variables_of_interest <- c("Pclass", "Sex", "SibSp", "Parch", "Embarked", "TitleCategory", "AgeGroup")
+
+# par(mfrow=c(3, 2))  # 设置布局为3行2列的图表
+
+for (variable in variables_of_interest) {
+  survival_data <- calculate_survival_rate(titanic_data, variable)
+  plot_survival_rate(survival_data, paste("Survival Rate by", variable))
+}
+
+# 恢复默认图表布局
+par(mfrow=c(1, 1))
+
+```
+
