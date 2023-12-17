@@ -4,12 +4,21 @@ author: "yjy"
 date: "2023-12-06"
 output: word_document
 ---
+时序模型——股票分析
+背景介绍
+当前，随着金融市场动态的不断演变，股票市场的错综复杂性日益凸显，令投资决策变得更加艰巨。在这一挑战背景下，本项目致力于运用先进的股票分析方法，以深入剖析市场波动，准确捕捉市场趋势、风险和机遇。通过为投资者提供深刻见解，我们旨在协助其制定更为智慧的决策，使其能够更从容地应对市场的动荡，最大程度地提升投资成功的可能性。
+鉴于股票价格和交易量等金融数据的明显时序性特征，我们决定采用时序模型进行建模。时序模型能够更准确捕捉数据的时序关系，为我们的分析提供更为精细和可靠的基础。通过引入时序模型，我们能够实现对市场变动的更敏锐感知，从而提高预测的准确性，从而为投资者提供更为可靠的决策支持，使其能够更有信心和智慧地应对复杂多变的金融市场
 
+数据集说明
+本项目使用的数据集是从 www.nasdaq.com 通过⽹络抓取所收集到的，内容包括苹果、星巴克、微软、思科系统、⾼通、
+Meta、亚⻢逊、特斯拉、Advanced Micro Devices和Netflix十家上市公司的股价、交易量，
+共25161⾏，每⾏代表特定公司在给定⽇期的股市数据。
+
+数据预处理
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-读取数据
 ```{r 读取数据}
 raw_data<-read.table("./stock.csv",header=TRUE,sep=",")
 summary(raw_data)#检查数据类型
@@ -59,7 +68,7 @@ data_NFLX<-subset(data,Company=="NFLX")
 data_QCOM<-subset(data,Company=="QCOM")
 data_SBUX<-subset(data,Company=="SBUX")
 data_TSLA<-subset(data,Company=="TSLA")
-company_data <- list(
+company_dataset <- list(
   data_AAPL,
   data_AMD,
   data_AMZN,
@@ -72,34 +81,44 @@ company_data <- list(
   data_TSLA
 )
 #把各公司的数据转为ts
+dt1 <- data_AAPL[,"Date"]
 ts_list<-list()
-for(i in 1:length(company_data)){
-   temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
-   date_indices <- match(company_data[[i]]$Date, all_dates)
-   
-   # 将列全部修改为时间序列
-   for (col_name in names(company_data[[i]])) {
-      # 排除日期列
-      if (col_name != "Date") {
-         temp_ts[date_indices] <- company_data[[i]][, col_name]
-         ts_list[[length(ts_list) + 1]] <- temp_ts
-      }
-   }
-# temp_ts[date_indices] <- company_data[[i]]$Close.Last#注意这里只把收盘价填入了ts
-# ts_list[[length(ts_list) + 1]]<-temp_ts
-}
+ts_list_partial<-list()
+for(i in seq_along(company_dataset)){
+  
+  # 提取公司数据集的 "Date" 和五列数据
+  # company_data <- company_dataset[[i]]
+  
+  # 创建时间序列对象
+  # ts_object <- ts(company_data[, c("Close.Last")],
+                  #start = start_date,
+                 # end = end_date,
+                  #frequency = 1)
+  
+  # 将时间序列对象添加到列表中
+ # ts_list[[i]] <- ts_object
+  
+  #temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
+  #date_indices <- match(company_dataset[[i]]$Date, all_dates)
 
+  #temp_ts[date_indices] <- company_dataset[[i]]$Close.Last#注意这里只把收盘价填入了ts
+  ts_list[[i]]<-ts(company_dataset[[i]]$Close.Last,dt1)
+  
+  partial_data <- subset(company_dataset[[i]],Date>="2017-06-01" & Date<="2023-06-30")
+  dt2 <- partial_data[,"Date"]
+  ts_list_partial[[i]]<-ts(partial_data$Close.Last,dt2)
+}
 ```
 
 ```{r 清除工作空间的多余内容}
 #rm(season_ts)
 #remove.packages("ggplot2")
 #install.packages("htmltools", version = "0.5.7")
-install.packages("ggplot2")
+#install.packages("ggplot2")
 ```
 
 初步分析
-为了后期更好的建模，首先使用可视化手段对数据进行初步分析。
+为了后期更好的建模，我们首先利用可视化手段对数据进行初步分析。
 ```{r 下载需要的包}
 #install.packages("pacman")
 #install.packages("lubridate")
@@ -107,7 +126,7 @@ install.packages("ggplot2")
 #install.packages("plotly")
 ```
 
-这个部分可以不要？？
+（这个部分可以不要？？）
 ```{r 画收盘价的图}
 library(ggplot2)
 library(pacman)
@@ -128,6 +147,8 @@ legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty =
 # 添加图例，并指定对应的颜色# 添加图例，说明每个颜色对应的公司
 # 图例太大了，可能需要做相应的调整
 ```
+取2017年6月份-2023年6月份这6年间的数据进行建模
+解释为什么不使用2013-2014之间的数据
 
 ```{r 对每个公司画K线图}
 library(plotly)
@@ -135,6 +156,14 @@ plot_ly(company_data[[1]],x=~Date,type="candlestick", open=~Open,close=~Close.La
         high=~High,low=~Low,
         increasing=list(line=list(color="red")),
         decreasing=list(line=list(color="green")))
+```
+```{r quantmod绘制K线图-尝试-据说这样更好看}
+# install.packages("quantmod")
+# library(quantmod)
+
+# 首先将输入数据转为ts数据
+# chartSeries(data_AAPL)
+# library(forecast)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
@@ -205,15 +234,176 @@ cor_matrix$P
 corrplot(cor_matrix$r,method="pie",type="upper",order="hclust",col=c("darkorange","steelblue"),bg="lightgreen")
 
 ```
-```{r tseries尝试}
-# 尝试使用tseries绘制K线图、建立时间序列模型
-# install.packages("tseries")
-# library(tseries)
 
-# install.packages("quantmod")
-# library(quantmod)
+建模前，可以首先进行平稳性检测的简单判断
+首先根据各公司10年来的数据进行平稳性检测。
+```{r 平稳性检测-all}
+for (j in seq_along(ts_list)) {
+  current.data <- ts_list[[j]]
+  tsdisplay(current.data)
+  print(adf.test(current.data))
+}
+```
+增加Box.test检验
+```{r box-test}
+for (j in seq_along(ts_list)) {
+  print(Box.test(ts_list[[j]]))
+}
 
-# 首先将输入数据转为ts数据
-# chartSeries(data_AAPL)
+```
+p值均显著小于0.05，说明时间序列有显著的自相关性，一定为平稳序列或非平稳序列。
+
+尽管adf.test中有几家公司的p值小于0.05，但是从ACF图上看，自相关性系数几乎不衰减，因此认为每家公司股票的收盘价都是非平稳序列。
+```{r 差分-all}
+close.diff_list_all <- list()
+for (j in seq_along(ts_list)) {
+  current.data <- ts_list[[j]]
+  close.diff_list_all[[j]] <- diff(current.data,1)
+  tsdisplay(close.diff_list_all[[j]])
+  print(adf.test(close.diff_list_all[[j]]))
+}
+```
+故定参数d=1。
+从ACF图中看不出较为明显的季节性；故暂不列该项。
+从PACF图中可以看出有一些数据超出较多，可以考虑将各公司对应AR参数设置成如下情况：
+AAPL:1,8,9,11,18,22;18尤其，其余较为平均。
+
+```{r arima}
+#aapl_fit.auto <- auto.arima(data_AAPL$Close.Last)
+#accuracy(fit1)
+#tsdiag(fit1)
+
+aapl_fit1 <- arima(data_AAPL$Close.Last,order=c(1,1,0))#AIC=9711.14
+aapl_fit8 <- arima(data_AAPL$Close.Last,order=c(8,1,0))#AIC=9705.43
+aapl_fit9 <- arima(data_AAPL$Close.Last,order=c(9,1,0))#AIC=9699.23
+aapl_fit11 <- arima(data_AAPL$Close.Last,order=c(11,1,0))#AIC=9695.24
+aapl_fit18 <- arima(data_AAPL$Close.Last,order=c(18,1,0))#AIC=9688.27
+aapl_fit22 <- arima(data_AAPL$Close.Last,order=c(22,1,0))#AIC=9687.07
+```
+进行airma建模后，发现AIC最好的是aapl_fit2。但实际上AIC都非常的大。。。（考虑可能的原因？？）
+auto.arima()的结果是(0,1,2)#AIC=9706.8。此处我并未考虑趋势项
+
+尝试针对aapl_fit22绘制残差
+```{r arima模型残差}
+tsdiag(aapl_fit22)
+```
+p值基本都在0.5以上，说明特征都被提取出来了，不太有噪音。
+
+用QQ图来验证残差的正态性，从而确定模型质量
+```{r aapl-fit-qq}
+qqnorm(aapl_fit22$residuals)
+qqline(aapl_fit22$residuals)
+```
+但是QQ图结果较为糟糕，说明该模型表达不太好。
+
+如果直接使用该模型进行预测
+```{r}
+# 取测试机的步骤应该放在最前面，我这个地方弄得不太对
+aapl.test <- subset(data_AAPL,Date>"2023-06-30")
+dt.test <- aapl.test[,"Date"]
+aapl.test <- ts(aapl.test$Close.Last,dt.test)
+
+aapl.pred <- forecast(aapl_fit22,h=30,level=c(99.5))
+plot(aapl.pred)
+# 进行15个时间步的预测，置信区间为99.5
+original_dates <- time(aapl.pred$mean)
+
+# 获取预测结果的编号
+forecast_indices <- seq_along(aapl_fit22$mean) - 1
+
+# 使用编号映射到相应的日期
+forecast_dates <- original_dates[forecast_indices]
+
+# 将预测日期和相应的点估计合并
+forecast_result <- data.frame(Date = forecast_dates, Point = aapl_fit22$mean)
+
+plot(aapl.pred)
+# 绘制真实值
+lines(aapl.test,col="red") # 真实值用红色的线表示
 ```
 
+---
+
+这个部分我仅仅是做个尝试。因为我感觉2017年中旬之前每家公司股价好像都差不多，没有太大波动。所以就把数据截取了一下。
+```{r}
+# 截取一段时间：
+# start.time <- as.Date("2017-06-01")
+# end.time <- as.Date("2023-06-30")
+
+# 首先判断是否为非平稳序列
+# 结合ACF\PACF和adf.test来进行判断
+subset_data <- list()
+for (j in seq_along(ts_list_partial)) {
+  current.data <- ts_list_partial[[j]]
+  #subset_data[[j]] <- subset(current.data,Date >= "2017-06-01" & Date <= "2023-06-30")
+  subset_data[[j]] <- current.data
+  tsdisplay(subset_data[[j]])
+  print(adf.test(subset_data[[j]]))
+}
+```
+可知有些公司的股价并非为平稳序列，需要对其进行一阶差分
+
+```{r}
+# 第3\5\6\7\8\9号公司的收盘价序列是不平稳的，需要对其进行差分
+close.diff_list <- list()
+for (j in seq_along(subset_data)) {
+  current.data <- subset_data[[j]]
+  #close.diff_list[[j]] <- diff(current.data$Close.Last,1)
+  close.diff_list[[j]] <- diff(current.data,1)
+  tsdisplay(close.diff_list[[j]])
+  print(adf.test(close.diff_list[[j]]))
+}
+```
+做完一阶差分后，所有公司收盘价的adf.test()结果中p值都小于0.05，显著拒绝存在单位根，即差分后序列平稳。都设定d=1。
+仍然无法看出季节性。
+PACF仍有明显超出的时候，但整体情况比刚才要理想。
+仍暂时先以AAPL公司股票为例
+AAPL:18
+```{r 截取-AAPL-ARIMA模型拟合}
+#aapl_fit1_partial <- arima(subset_data[[i]]$Close.Last,order=c(18,1,0))## AIC=10093.93
+#aapl_fit_partial.auto <- auto.arima((subset_data[[i]]$Close.Last)) #(0,1,0)；AIC=10122.57
+aapl_fit1_partial <- arima(subset_data[[i]],order=c(18,1,0))
+aapl_fit_partial.auto <- auto.arima((subset_data[[i]]))
+```
+两个问题：
+和auto.arima结果不同的原因?
+拟合模型AIC值非常大的原因？
+
+模型估计
+```{r accuracy-aapl_fit_partial}
+accuracy(aapl_fit1_partial)
+tsdiag(aapl_fit1_partial)
+```
+
+得到all和partial的两个最佳模型:aapl_fit22和aapl_fit1_partial。下面利用这两个模型对2023年7月份的数据进行预测，并利用已知的7月份数据进行检验。
+模型预测
+仍暂时以aapl公司为例进行分析
+
+```{r adf}
+
+```
+
+股票不动性分析
+股票不动性通常指的是股票价格的波动性，即股价在一段时间内的变动幅度。股票不动性是衡量股票风险的一种方式，通常用来评估股票价格的不稳定性。波动性越高，股票价格的波动越大，风险越高。
+不动性分析可从以下几个方面入手：
+
+历史波动率分析： 通过计算历史波动率，投资者可以了解股票过去一段时间的价格波动情况。历史波动率可以用标准差来衡量，即股票收益率的标准差。较大的标准差表示较高的波动性。
+
+移动平均波动率分析： 使用移动平均波动率来平滑股票价格的波动性。通过计算一段时间内的移动平均值，投资者可以更清晰地看到长期趋势，减少短期波动的影响。
+
+波动率模型分析： 利用波动率模型，例如GARCH模型（广义自回归条件异方差模型），来对未来波动性进行建模。这种方法试图预测股票价格未来的波动性水平。
+
+波动率图表分析： 通过绘制波动率图表，投资者可以直观地观察股票价格的波动情况。图表可以基于历史波动率或其他波动率指标
+
+(数据有10年之久，真的需要使用这10年的数据进行不动性分析吗？我觉得可以先从K线图判断一个比较合适的时间窗口，然后再进行分析)
+
+模型建立
+数据集分割
+
+建议
+
+附：项目源码
+（需要把chunk整理一下//导入必要的包/数据预处理/初步分析/建模/预测）
+
+补充材料：
+股价走势预测模型通常基于技术分析、基本面分析或者混合模型，其中技术分析侧重于利用历史股价和交易量等数据进行趋势分析，而基本面分析则关注公司财务状况和业务基本面。混合模型结合了两者，试图更全面地理解股价的运动。
