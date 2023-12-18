@@ -48,6 +48,7 @@ summary(data)#再次检查数据类型以及检查是否有空值
 ```
 
 ```{r 提取各个公司的数据，转为ts类型}
+library(zoo)
 # 创建一个连续时间序列
 end_date <- tail(data$Date,n=1)
 start_date <- head(data$Date,n=1)
@@ -74,29 +75,67 @@ company_data <- list(
   data_QCOM,
   data_SBUX,
   data_TSLA
-)
-#把各公司的数据转为ts
+)#转为List以便遍历
+```
+
+```{r 以data_aapl为例，计算它每一年有多少数据}
+print(2014)
+nrow( subset(data_aapl,Date>=as.Date("2014-01-01") & Date<as.Date("2015-01-01")))
+print(2015)
+nrow( subset(data_aapl,Date>=as.Date("2015-01-01") & Date<as.Date("2016-01-01")))
+print(2016)
+nrow( subset(data_aapl,Date>=as.Date("2016-01-01") & Date<as.Date("2017-01-01")))
+print(2017)
+nrow( subset(data_aapl,Date>=as.Date("2017-01-01") & Date<as.Date("2018-01-01")))
+print(2018)
+nrow( subset(data_aapl,Date>=as.Date("2018-01-01") & Date<as.Date("2019-01-01")))
+print(2019)
+nrow( subset(data_aapl,Date>=as.Date("2019-01-01") & Date<as.Date("2020-01-01")))
+print(2020)
+nrow( subset(data_aapl,Date>=as.Date("2020-01-01") & Date<as.Date("2021-01-01")))
+print(2021)
+nrow( subset(data_aapl,Date>=as.Date("2021-01-01") & Date<as.Date("2022-01-01")))
+print(2022)
+nrow( subset(data_aapl,Date>=as.Date("2022-01-01") & Date<as.Date("2023-01-01")))
+#结果：发现是均匀分布的，那么所有数据都可以拿来进行建模
+```
+
+
+```{r 把各公司的数据转为ts}
+library(zoo)
+total_days=as.integer(difftime(end_date, start_date, units = "days"))
+total_days
+```
+
+
+```{r 把各公司的数据转为ts}
+library(zoo)
 ts_list<-list()
 for(i in 1:length(company_data)){
    temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
    date_indices <- match(company_data[[i]]$Date, all_dates)
    temp_ts[date_indices] <- company_data[[i]]$Close.Last#注意这里只把收盘价填入了ts
+   temp_ts<-na.approx(temp_ts)#线性插值
    ts_list[[length(ts_list) + 1]]<-temp_ts
 }
+```
 
+
+```{r 对时间序列中的缺失值做处理}
+print(end(ts_list[[1]]))
 ```
 ```{r 清除工作空间的多余内容}
-#rm(season_ts)
+rm(ts_list)
 #remove.packages("ggplot2")
 #install.packages("htmltools", version = "0.5.7")
-install.packages("ggplot2")
+#install.packages("ggplot2")
 ```
 
 
 ```{r 画收盘价的图}
 library(ggplot2)
-library(pacman)
-library(lubridate)
+#library(pacman)
+#library(lubridate)
 library(RColorBrewer)
 fig1_col <- brewer.pal(n = 10, name = "Paired")
 #参考自：https://zhuanlan.zhihu.com/p/35366657
@@ -109,36 +148,230 @@ for(i in 2:length(ts_list))
 
 axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
 legend_text <- c("AAPL", "AMD","AMEN","CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA")  # 自定义图例文本
-legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  # 添加图例，并指定对应的颜色# 添加图例，说明每个颜色对应的公司
+legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  # 添加图例，说明每个颜色对应的公司
 ```
 ```{r 对每个公司画K线图}
-library(plotly)
-plot_ly(company_data[[1]],x=~Date,type="candlestick", open=~Open,close=~Close.Last,
+ library(plotly)
+for(i in 1:length(ts_list)){
+p<-plot_ly(company_data[[i]],x=~Date,type="candlestick", open=~Open,close=~Close.Last,
         high=~High,low=~Low,
         increasing=list(line=list(color="red")),
         decreasing=list(line=list(color="green")))
+print(p)
+}
+#library(quantmod)
+
+# 将数据转换为xts对象
+# company_xts <- xts(company_data[[1]][, c("Open", "High", "Low", "Close.Last", "Volume")],
+#                    order.by = company_data[[1]]$Date)
+# for(i in 1:length(ts_list)){
+#   company_xts<-xts(company_data[[i]][, c("Open", "High", "Low", "Close.Last", "Volume")],
+#                    order.by = company_data[[i]]$Date)
+#   # 绘制蜡烛图和成交量
+# chartSeries(company_xts, type = "candlesticks", 
+#             theme = chartTheme("white"),
+#             up.col = "red", dn.col = "green",
+#             TA = c(addSMA(n = 30, col = "red"), addVo()))
+# #mean(ts_list[[i]]
+# abline(h = 50, col = "magenta",lwd=3)
+# }
+
+
+
+```
+```{r 对K线图得到的结论}
+#我们可以根据时序图进行平稳性判断。平稳序列的时序图应该呈现序列值始终在一个常数附近随机波动，而且波动的范围有界、无明显趋势及周期特征。
+#AAPL：有明显上升趋势，看上去也有一定周期性（这个后面还要进一步分析）
+mean(company_data[[7]]$Close.Last,na.rm = TRUE)
+mean(ts_list[[7]])
+#abline(h = mean(company_data[[7]]$Close.Last,na.rm = TRUE), col = "cyan",lwd=3)
 ```
 
+```{r 用自相关图检验平稳性}
+
+# ts_month_aapl<-with(company_data[[1]], ts(Close.Last, start = c(year(start_date), month(start_date)), frequency = 1))
+acf(ts_list[[1]],lag.max=total_days,main = "ACF for AAPL")
+acf(ts_list[[1]],lag.max=10,main = "short_delay for AAPL")
+acf(ts_list[[2]],lag.max=total_days,main = "ACF for AMD")
+acf(ts_list[[7]],lag.max=total_days,main = "ACF for NFLX")
+#plot(acf_result, main = "时间序列的自相关函数图")
+```
+
+```{r 对自相关图的分析}
+#观察AAPL的自相关图，它从1开始递减，递减到-0.35的时候又递增到了0，因此可以判断该时间序列存在一定的趋势，并不是平稳的
+#另外，观察它短期延迟的自相关图，发现它短期内是有显著相关性的，那么就能判断出它一定不是白噪声序列
+```
+
+```{r 白噪声检验}
+Box.test(ts_list[[1]],lag=total_days)
+#为了以防万一，还是进行了LB检验。发现P值很小，所以拒绝原假设（原假设是，该数据是白噪声的）
+```
+```{r 简单预处理}
+library(forecast)
+for(i in 1:length(ts_list))
+{
+  tsdisplay(ts_list[[i]],main="原始数据",col=fig1_col[i])
+  tsdisplay(diff(ts_list[[i]]),main="一阶差分",col=fig1_col[i])
+}
+#结论：所有股价数据都是 从LAG=1到35都有显著的自相关性，说明它们都不是平稳的，所以需要进一步差分
+```
+```{r}
+end(ts_list[[1]])
+ts_list[[1]][which(time >= 18000 & time <= 18100)]
+```
+```{r 尝试季节性分析，对股票收盘价按月取了平均值}
+# 安装和加载所需的包
+library(dplyr)
+library(zoo)
+library(lubridate)
+library(ggplot2)
+for(i in 1:length(ts_list)){
+# 将 date 列转换为年份和月份
+temp_df <- mutate(company_data[[i]], Year = lubridate::year(Date), Month = lubridate::month(Date))
+
+# 使用 dplyr 中的 group_by 和 summarise 函数计算每个月的平均分数
+monthly_avg <- temp_df %>%
+  group_by(Year, Month) %>%
+  summarise(AvgScore = mean(Close.Last), .groups = 'keep')
+
+# 将结果转换为时间序列对象
+data_month <- ts(monthly_avg$AvgScore, start = c(min(monthly_avg$Year), min(monthly_avg$Month)), frequency = 12)
+p<-ggseasonplot(data_month)
+print(p)
+}
+#结果分析：首先看ACF和时序图，都能看出它没有明显的周期性
+#也画了季节性图，可以看出每一年股票随季节的变化并不完全相同
+```
+```{r 依次对各个公司进行分析}
+#首先要区分出训练数据和测试数据 打算把最近6个月的数据作为测试数据（即最后面的200天数据）
+#一共3600+天，通过观察图像，决定不用最前面的1500天来训练（我们已经证明了一阶差分的数据是平稳的，所以训练集可以任意取）
+train_ts_list<-list()
+# 从 start(ts_list[[1]]) 到 18000 的数据为 NA
+temp_na_data <- rep(NA, length.out =18000 - start(ts_list[[1]]))
+# 从 end(ts_list[[1]])-200 到 end(ts_list[[1]]) 的数据为 NA
+temp_na_data_end <- rep(NA, length.out =end(ts_list[[1]]) - (end(ts_list[[1]])-200))
+temp_subset_data <- window(ts_list[[1]],start= 18000,end=end(ts_list[[1]])-200 )
+# 合并 NA 数据和 subset_data 数据
+temp_combined_data <- c(temp_na_data, temp_subset_data)
+temp_ts <- ts(temp_combined_data, start = start_date,frequency = 1)  # 创建新数据的时间序列对象
+  train_ts_list[[1]]<-temp_ts
+  plot(ts_list[[1]],col="blue")
+  lines(temp_ts)
+  #通过画图，可以看到已经取出了合适的训练数据集
+```
+
+```{r 分析aapl}
+library(tseries)
+library(graphics)
+library(forecast)
+library(tseries)
+temp1_ts<-diff(train_ts_list[[1]],1)
+tsdisplay(temp1_ts)
+
+#结果分析：经过一阶差分，由时序图可以看出它已经变得相对平稳
+#通过ACF也可以发现 一阶差分已经有效地消除了原始时间序列的自相关性
+Box.test(temp1_ts)#再次进行白噪声分析，发现它是白噪声的
+checkresiduals(temp1_ts)#检验残差，发现符合正态分布
+
+#进行了一阶差分后，发现这是一个白噪声序列，所以就不再进行后续分析
+```
+
+```{r 通过图像展示相似度}
+library(lubridate)
+fit1=arima(train_ts_list[[1]],order=c(0,1,0))
+fit1
+f.p1=forecast(fit1,h=end(ts_list[[1]])-end(train_ts_list[[1]]),level=c(99.5))
+plot(f.p1,xlim = c(start_date, end_date), xaxt = "n", main = "AAPL公司的收盘价随时间变化图", xlab = "时间", ylab = "收盘价",ylim = c(0, 250))
+lines(ts_list[[1]],col=fig1_col[1])
+axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
+#结果分析：从长期来看，股票的变动是纯随机的
+```
+
+
+
+
+```{r 试着对股票做短期预测}
+# 只取最后55天的股票来预测最后一周的数据
+temp_subset_data <- window(ts_list[[1]],start= 19500,end=as.integer(end_date)-7) #end(ts_list[[1]])-7 )
+temp_complete_data<-window(ts_list[[1]],start= 19500,end=end(ts_list[[1]]) )
+#temp_ts_short <- ts(temp_subset_data, start = 19500,frequency = 1)  # 创建新数据的时间序列对象
+  plot(temp_complete_data,col="blue")
+  lines(temp_subset_data,col="red")
+  #通过画图，可以看到已经取出了合适的训练数据集
+
+```
+```{r}
+tsdisplay(temp_subset_data)
+#分析：ACF在7阶后拖尾，PACF在1阶后截尾
+#所以应该用(1,0,0)
+```
+
+
+
+```{r}
+arima(temp_subset_data,order=c(1,0,0))
+#auto.arima(temp_subset_data)
+```
+
+
+```{r 对aapl做短期预测}
+library(forecast)
+fit1_short=arima(temp_subset_data,order=c(1,0,0))
+fit1_short
+f.p1=forecast(fit1_short,h=7,level=c(99.5))
+plot(f.p1,xlim = c(19500, end_date),ylim=c(150,200),  main = "AAPL公司的收盘价随时间变化图", xlab = "时间", ylab = "收盘价")
+points(temp_complete_data)
+#显然做短期预测的话是更准确的
+
+```
+
+
+
+```{r 对每个股票数据，取出最后14天的股价来做预测 这一步是为了找出最佳潜力股}
+last_prediction_list<-list()
+for(i in 1:length(ts_list))
+{
+  temp_window_data <- window(ts_list[[i]],start= as.integer(end_date)-14,end=as.integer(end_date))
+  model_last=auto.arima(temp_window_data)
+  #print(model_last)
+  model.pl=forecast(model_last,h=7,level=c(99.5))
+  last_prediction_list[[i]]<-model.pl$mean
+  last_close<-tail(as.vector(ts_list[[i]]), n = 1)
+  print(last_close)
+  for(j in 1:7)
+  {
+    last_prediction_list[[i]][j]=last_prediction_list[[i]][j]-last_close
+  }
+  
+}
+
+```
+```{r}
+plot(x=NULL,y=NULL,xlim=c(end(ts_list[[i]])[1]+1, end(ts_list[[i]])[1]+7),ylim=c(-10,30))
+for(i in 1:length(last_prediction_list)){
+  lines(last_prediction_list[[i]], col = fig1_col[i])
+  print(i)
+}
+```
+
+
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
 ```{r 对Volume这个属性画柱形图}
 library(ggplot2)
-ggplot(subset(data,Date>=as.Date("2023-06-01")), aes(x = Date, y = Volume, fill = Company)) +
-  geom_bar(stat = "identity", position = "stack")+
-  scale_fill_manual(values = fig1_col)
+ggplot(subset(data,Date>=as.Date("2023-05-01")), aes(x = Date, y = Volume, fill = Company)) +
+  geom_area(stat = "identity", position = "fill")+
+  scale_fill_manual(values = fig1_col) 
 #如果要获得某个时间点之后的数据：Date>=as.Date("2023-01-01"),aes(x = Date, y = Volume, fill = Company)
 #如果要获得同一天的各个公司比较：aes(x = Company, y = Volume, fill = Company)
 ```
-```{r 做季节性分析}
-library(ggseas)
-library(ggplot2)
-library(forecast)
-library(zoo)
-# 创建时间序列对象，并将频率设置为12（表示每月）
-ts_obj <- na.locf(ts_list[[1]], fromLast = FALSE)
-ts_obj <- ts(data = ts_obj, frequency = 12)
+```{r 股票之间的相关性分析}
+correlation_matrix <- cor(cbind(ts_list[[1]],ts_list[[2]],ts_list[[3]],ts_list[[4]],ts_list[[5]],ts_list[[6]],ts_list[[7]],ts_list[[8]],ts_list[[9]],ts_list[[10]]))
+print(correlation_matrix)
+#发现1和6的相关性非常强，预测1的时候可以加入6的数据
+```
 
-# 绘制季节图
-seasonplot(ts_obj)
+
 
 
 ```
