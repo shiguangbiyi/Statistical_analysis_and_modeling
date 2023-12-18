@@ -3,27 +3,36 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+一、研究课题
+泰坦尼克号的沉没是历史上最著名的沉船事故之⼀。1912年4⽉15⽇，在处⼥航中，被认为“永不沉没”的皇家邮轮泰坦尼克号与冰⼭相撞后沉没。不幸的是，船上没有⾜够的救⽣艇容纳所有⼈，导致2224名乘客和船员中的1502⼈死亡。虽然⽣存有⼀些运⽓因素，但似乎有些群体⽐其他群体更有可能⽣存下来。请使⽤乘客数据（包括姓名、年龄、性别、社会经济阶层等）建⽴⼀个预测模型，尝试思考和回答以下问题：“什么样的⼈更有可能存活下来？”。
 
+二、确定模型
+对于这个问题，由于需要预测是否存活（Survived），是一个典型的二元分类问题。因此，可以使用各种二元分类模型来进行分析。可以使用广义线性回归中的逻辑回归模型。
+
+三、原始数据分析
+在对数据进行预处理前，可以先对原数据进行一系列分析，首先导入csv文件：
 ```{r}
-# 数据分析/结论
-
 # 将数据导入数据框
 titanic_data <- read.csv("titanic.csv", stringsAsFactors = FALSE)
-
 # 查看数据框的结构
 str(titanic_data)
-
 # 获取数据框的摘要统计信息
 summary(titanic_data)
 ```
-
+检查缺失值：
 ```{r}
 # 检查每列的缺失值，包括字符型变量
 sapply(titanic_data, function(x) sum(is.na(x) | x == ""))
-
+```
+可以看到年龄数据的缺失值较多。
+计算相关值：
+```{r}
 # 计算相关矩阵
 cor(titanic_data[, c("Survived", "Age", "Pclass", "Fare")])
+```
 
+计算整体生存率和不同子集的生存率作比较参考：
+```{r}
 # 整体生存率
 mean(titanic_data$Survived)
 
@@ -31,20 +40,30 @@ mean(titanic_data$Survived)
 tapply(titanic_data$Survived, titanic_data$Sex, mean)
 
 # 创建年龄组
-# titanic_data$AgeGroup <- cut(titanic_data$Age, breaks = c(0, 18, 30, 50, 100), labels = c("0-18", "18-30", "30-50", "50+"))
+titanic_data$AgeGroup <- cut(titanic_data$Age, breaks = c(0, 18, 30, 50, 100), labels = c("0-18", "18-30", "30-50", "50+"))
 
 # 不同年龄组的生存率
-# tapply(titanic_data$Survived, titanic_data$AgeGroup, mean, na.rm = TRUE)
+tapply(titanic_data$Survived, titanic_data$AgeGroup, mean, na.rm = TRUE)
+```
 
+
+```{r}
 # 使用箱线图等可视化工具分析异常值
 boxplot(titanic_data$Fare, main = "乘客票价箱线图")
 ```
 
-```{r}
-# 数据预处理
 
-# 缺失值处理
-# 修补 Embarked 数据
+四、数据预处理
+
+1.缺失值处理
+
+根据原始数据分析的结果可知，Age属性有177个缺失值，Embarked属性有2个缺失值，Cabin属性有687个缺失值。对于这三种缺失值，分别采用不同的处理方式。
+
+
+
+修补Embarked数据
+对于Embarked这种缺失值极少的，适合用该属性的取值最多的值来填补缺失值。
+```{r}
 # 查询 Embarked 属性的各值的数量统计
 embarked_counts <- table(titanic_data$Embarked)
 
@@ -55,13 +74,20 @@ most_common_embarked <- names(which.max(embarked_counts))
 titanic_data$Embarked[titanic_data$Embarked == ""] <- most_common_embarked
 ```
 
+
+
+修补Cabin数据
+对于Cabbin这种缺失值占比很大的，并且不为数字类型的，可以将缺失值作为新的一类填补进去。由于Cabin是表示客舱编号，客舱的位置很大可能影响人的生存情况，根据数据实际的情况来看，Cabin为空可能代表没有客舱可坐，所以将空值单独作为新值是有必要且有实际意义的。
 ```{r}
 # 将 Cabin 属性中的缺失值替换为 "NC"
 titanic_data$Cabin[titanic_data$Cabin == ""] <- "NC"
 
-sapply(titanic_data, function(x) sum(is.na(x) | x == ""))
 ```
 
+
+
+修补Age数据
+对于Age这种缺失值占比较大的，且为数字类型的，可以从特殊角度考虑数据填补的方法。注意到在Name属性一栏中有乘客身份相关的信息，例如Mr、Miss、Mrs等，考虑到乘客身份很有可能跟年龄有关系，所以先统计一下各种称呼的人数：
 ```{r}
 # 提取姓名中的称谓作为新的特征
 titanic_data$Title <- gsub('.*,\\s(\\w+)\\..*', '\\1', titanic_data$Name)
@@ -72,13 +98,19 @@ title_counts <- table(titanic_data$Title)
 # 输出结果
 print(title_counts)
 ```
+可以发现最主要的身份包括Mr、Miss、Mrs、Master，其他身份都是少数，所以将乘客身份信息分为五类，每种身份分别计算年龄的平均值。
+
+由于要计算平均值，所以先查找年龄数据是否有异常值，先做异常值处理。年龄的异常值需要根据实际情况来考虑，而不是根据数据分布情况，只需要考虑数据是否在正常年龄范围内（0~120岁）即可。根据以下代码：
 ```{r}
 # 查找年龄中的异常值
 age_outliers <- titanic_data$Age < 0 | titanic_data$Age > 120
 
 # 输出异常值
 print(titanic_data[age_outliers, c("PassengerId", "Age")])
-
+```
+可见没有异常值。
+接下来分别计算不同身份的年龄平均数：
+```{r}
 # 创建新的身份类别列
 titanic_data$TitleCategory <- ifelse(titanic_data$Title %in% c("Mr", "Miss", "Mrs", "Master"), titanic_data$Title, "Other")
 
@@ -87,7 +119,9 @@ average_age_by_title <- tapply(titanic_data$Age[!is.na(titanic_data$Age)], titan
 
 # 输出结果
 print(average_age_by_title)
-
+```
+四舍五入填入空缺的身份信息类：
+```{r}
 # 根据身份信息填充空缺年龄数据
 for (title_category in names(average_age_by_title)) {
   missing_age_indices <- which(is.na(titanic_data$Age) & titanic_data$TitleCategory == title_category)
@@ -96,70 +130,247 @@ for (title_category in names(average_age_by_title)) {
 }
 
 titanic_data$AgeGroup <- cut(titanic_data$Age, breaks = c(-Inf, 18, 30, 50, Inf), labels = c("0-18", "19-30", "31-50", "51+"))
-
-
 ```
+
+
+
+
+2.异常值处理
+年龄异常值前面已经寻找过，另一个可能出现异常值的属性为票价，根据原始数据分析中的票价箱线图中可以看出，有值明显偏离数据集中区域，下面进行分析：
 ```{r}
-# 异常值处理
 # 票价异常值处理
 # 找出票价超过500的行
 high_fare_rows <- which(titanic_data$Fare > 500)
 
 # 输出找到的行
 print(titanic_data[high_fare_rows, ])
+```
+发现票价超过500的票价都为512.3292，且Pclass都为1，故该票价为异常值的可能性很小，故不做处理。
 
 
-# 数据去重
+3.数据去重
+```{r}
 # 检测是否有重复行
 has_duplicates <- any(duplicated(titanic_data))
 
 # 输出结果
 print(has_duplicates)
+```
+输出结果为FALSE，说明没有重复数据。
 
+
+
+4.数据数值化及其他处理
+由于数据分析通常需要对数值进行研究，所以有必要将一些字符型数据转变成数值型数据。由于Ticket数据类别过多，且实际情况中与存活率关系不大，可以考虑不处理这个属性。
+
+sex数据数值化（男性为1，女性为0）
+```{r}
 # 将 "male" 编码为 1，"female" 编码为 0
 titanic_data$Gender <- ifelse(titanic_data$Sex == "male", 1, 0)
+```
 
+Embarked 数据数值化
+两种方法：
+方法一：映射整数
+```{r}
 # 使用 label encoding 将 Embarked 列映射为整数
 titanic_data$Embarked_Code <- as.integer(factor(titanic_data$Embarked))
 ```
-
+方法二：独热编码
 ```{r}
-# 将 Cabin 列进行 Label Encoding
-titanic_data$Cabin_Code <- as.integer(factor(titanic_data$Cabin))
-
-# 将 TitleCategory 列进行 Label Encoding
-titanic_data$Title_Code <- as.integer(factor(titanic_data$TitleCategory))
+# 对 Embarked 列进行独热编码
+embarked_one_hot <- model.matrix(~ Embarked - 1, data = titanic_data)
 ```
 
 
+TitleCategory 数据数值化
+两种方法：
+方法一：映射整数
+```{r}
+# 将 TitleCategory 列进行 Label Encoding
+titanic_data$Title_Code <- as.integer(factor(titanic_data$TitleCategory))
+```
+方法二：独热编码
+```{r}
+# 对 TitleCategory 列进行独热编码
+title_one_hot <- model.matrix(~ TitleCategory - 1, data = titanic_data)
+```
+
+
+Cabin 数据数值化
+```{r}
+# 将 Cabin 列进行 Label Encoding
+titanic_data$Cabin_Code <- as.integer(factor(titanic_data$Cabin))
+```
+
+
+```{r}
+# 将编码结果添加到原始数据集
+titanic_data <- cbind(titanic_data, embarked_one_hot, title_one_hot)
+```
+
+
+
+```{r}
+library(caret)
+
+# 设置随机种子以确保结果可重复
+# set.seed(1)
+
+# 划分数据集，80% 用于训练，20% 用于测试
+index <- createDataPartition(titanic_data$Survived, p = 0.8, list = FALSE)
+train_data <- titanic_data[index, ]
+test_data <- titanic_data[-index, ]
+
+print(paste("训练集观测数：", nrow(train_data)))
+print(paste("测试集观测数：", nrow(test_data)))
+```
+
+
+方法一(映射整数)测试：
 ```{r}
 # 导入逻辑回归库
 library(glmnet)
 
-# 假设 "Survived" 是目标变量
-# 创建逻辑回归模型
-glm_model <- glm(Survived ~ Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + Embarked_Code + Title_Code, 
+glm_model1 <- glm(Survived ~ Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + Embarked_Code + Title_Code, 
                  family = binomial, 
-                 data = titanic_data)
-summary(glm_model)
+                 data = train_data)
+summary(glm_model1)
+# 计算准确率
+predictions1 <- predict(glm_model1, newdata = test_data, type = "response")
+predicted_classes <- ifelse(predictions1 > 0.5, 1, 0)
+accuracy <- sum(predicted_classes == test_data$Survived) / length(test_data$Survived)
+print(paste("模型1准确率:", round(accuracy, 4)))
+```
+多次实验后发现Fare、Cabin_Code、Title_Code、Parch、Embarked_Code的p值始终较大。所以：
+去除Fare、Cabin_Code、Title_Code、Parch、Embarked_Code：
+```{r}
+glm_model2 <- glm(Survived ~ Age + Gender + Pclass + SibSp, family = binomial, data = train_data)
+summary(glm_model2)
+# 计算准确率
+predictions2 <- predict(glm_model2, newdata = test_data, type = "response")
+predicted_classes <- ifelse(predictions2 > 0.5, 1, 0)
+accuracy <- sum(predicted_classes == test_data$Survived) / length(test_data$Survived)
+print(paste("模型2准确率:", round(accuracy, 4)))
+```
+
+
+
+方法二测试：
+考虑到部分属性之间存在共线性问题，会导致p值输出异常，共线性分析如下：
+```{r}
+glm_model3 <- glm(Survived ~ Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + EmbarkedC + EmbarkedQ + TitleCategoryMaster + TitleCategoryMiss + TitleCategoryMr + TitleCategoryMrs, family = binomial, data = train_data)
+library(car)
+vif(glm_model3)
+```
+可以看到 Gender、TitleCategoryMiss、TitleCategoryMrs、TitleCategoryMr有共线性问题，所以删除这三个特征。
+```{r}
+glm_model4 <- glm(Survived ~ Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + EmbarkedC + EmbarkedQ + TitleCategoryMaster , family = binomial, data = train_data)
+summary(glm_model4)
+
+predictions4 <- predict(glm_model4, newdata = test_data, type = "response")
+predicted_classes <- ifelse(predictions4 > 0.5, 1, 0)
+accuracy <- sum(predicted_classes == test_data$Survived) / length(test_data$Survived)
+print(paste("模型4准确率:", round(accuracy, 4)))
+```
+
+删除Fare、Cabin_Code、EmbarkedQ、EmbarkedC、Parch:
+```{r}
+glm_model5 <- glm(Survived ~ Age + Gender + Pclass + SibSp + TitleCategoryMaster , family = binomial, data = train_data)
+summary(glm_model5)
+
+predictions5 <- predict(glm_model5, newdata = test_data, type = "response")
+predicted_classes <- ifelse(predictions5 > 0.5, 1, 0)
+accuracy <- sum(predicted_classes == test_data$Survived) / length(test_data$Survived)
+print(paste("模型5准确率:", round(accuracy, 4)))
 ```
 
 ```{r}
-glm_model0 <- glm(Survived ~ Age + Gender + Pclass + SibSp + Embarked_Code, family = binomial, data = titanic_data)
-summary(glm_model0)
-```
-```{r}
-boxplot(titanic_data$Pclass ~ titanic_data$Embarked_Code)
-boxplot(titanic_data$Age ~ titanic_data$Embarked_Code)
-boxplot(titanic_data$Gender ~ titanic_data$Embarked_Code)
-boxplot(titanic_data$SibSp ~ titanic_data$Embarked_Code)
-```
-```{r}
-# Age + Gender + Pclass + SibSp + Parch + Fare + Cabin_Code + Embarked_Code + Title_Code
-cor(titanic_data[, c("Embarked_Code", "Age", "Gender", "Pclass", "SibSp", "Parch", "Fare", "Cabin_Code", "Title_Code","Survived")])
-table(titanic_data$Embarked_Code, titanic_data$Pclass)
+# Assuming you have fit2 and fit5
+par(mfrow=c(1,2))
+library(ROCR)
 
+plot_roc <- function(predictions, actuals, main_title) {
+  pred <- prediction(predictions, actuals)
+  auc <- performance(pred, "auc")@y.values
+  plot(performance(pred, "tpr", "fpr"), colorize = TRUE, lwd = 3, main = main_title)
+  abline(a = 0, b = 1, lty = 2, lwd = 3, col = "black")
+  return(auc)
+}
+
+# Assuming predictions2 and predictions5 are the predicted probabilities for models 2 and 5
+actuals <- test_data$Survived
+
+# Plot ROC curve and calculate AUC for Model 2
+auc2 <- plot_roc(predictions2, actuals, "模型二的ROC曲线")
+
+# Plot ROC curve and calculate AUC for Model 5
+auc5 <- plot_roc(predictions5, actuals, "模型五的ROC曲线")
+
+# Print AUC values
+cat("模型二的AUC值:", auc2[[1]], "\n")
+cat("模型五的AUC值:", auc5[[1]], "\n")
 ```
+
+```{r}
+# 混淆矩阵函数
+conf_matrix <- function(predictions, true_labels, threshold) {
+  predicted_labels <- ifelse(predictions > threshold, 1, 0)
+  confusion_matrix <- table(predicted_labels, true_labels)
+  return(confusion_matrix)
+}
+
+# 计算准确率
+accuracy <- function(conf_matrix) {
+  sum(diag(conf_matrix)) / sum(conf_matrix)
+}
+
+# 计算灵敏度
+sensitivity <- function(conf_matrix) {
+  conf_matrix[2, 2] / sum(conf_matrix[2, ])
+}
+
+# 计算特异度
+specificity <- function(conf_matrix) {
+  conf_matrix[1, 1] / sum(conf_matrix[1, ])
+}
+
+# 计算精准率
+precision <- function(conf_matrix) {
+  conf_matrix[2, 2] / sum(conf_matrix[, 2])
+}
+
+# 计算F1值
+f1_score <- function(conf_matrix) {
+  2 * precision(conf_matrix) * sensitivity(conf_matrix) / (precision(conf_matrix) + sensitivity(conf_matrix))
+}
+
+# 模型2的性能指标
+threshold2 <- 0.5  # 可根据需要调整阈值
+conf_matrix2 <- conf_matrix(predictions2, test_data$Survived, threshold2)
+
+cat("Model 2:\n")
+cat("准确率 (Accuracy):", accuracy(conf_matrix2), "\n")
+cat("灵敏度 (Sensitivity):", sensitivity(conf_matrix2), "\n")
+cat("特异度 (Specificity):", specificity(conf_matrix2), "\n")
+cat("精准率 (Precision):", precision(conf_matrix2), "\n")
+cat("F1值 (F1 Score):", f1_score(conf_matrix2), "\n")
+
+# 模型5的性能指标
+threshold5 <- 0.5  # 可根据需要调整阈值
+conf_matrix5 <- conf_matrix(predictions5, test_data$Survived, threshold5)
+
+cat("\nModel 5:\n")
+cat("准确率 (Accuracy):", accuracy(conf_matrix5), "\n")
+cat("灵敏度 (Sensitivity):", sensitivity(conf_matrix5), "\n")
+cat("特异度 (Specificity):", specificity(conf_matrix5), "\n")
+cat("精准率 (Precision):", precision(conf_matrix5), "\n")
+cat("F1值 (F1 Score):", f1_score(conf_matrix5), "\n")
+```
+
+
+
+
 ```{r}
 # 计算存活率
 calculate_survival_rate <- function(data, variable) {
@@ -177,7 +388,7 @@ plot_survival_rate <- function(survival_data, title) {
 }
 
 # 计算并可视化所有属性与存活率的关系
-variables_of_interest <- c("Pclass", "Sex", "SibSp", "Parch", "Embarked", "TitleCategory", "AgeGroup")
+variables_of_interest <- c("Pclass", "Sex", "SibSp", "Parch", "Embarked", "TitleCategoryMaster", "AgeGroup")
 
 # par(mfrow=c(3, 2))  # 设置布局为3行2列的图表
 
@@ -190,4 +401,4 @@ for (variable in variables_of_interest) {
 par(mfrow=c(1, 1))
 
 ```
-
+经过如上图示并综合模型分析结果可以发现，生存率和性别、票级、兄弟姐妹/配偶数关系较大，女性、票级越高、有一到两个同行者存活率更高，同时也与年龄有一定关系，年龄更小的相对存活率高些，同时有一个特殊的发现，即头衔为Master的人存活率普遍高于其他人。
