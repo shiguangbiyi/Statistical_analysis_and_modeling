@@ -1,0 +1,709 @@
+---
+title: "time_analyse"
+author: "yjy&&TangTang"
+date: "2023-12-06"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 项目要求
+  现有从www.nasdaq.com通过⽹络抓取收集的数据，内容为上市公司的股价和交易量，如苹果、星巴克、微软、思科系统、⾼通、Meta、亚⻢逊、特斯拉、Advanced Micro Devices和Netflix，共包含25161⾏。请利用提供的数据集进行统计分析，并为投资者提出可靠并宝贵的建议。
+
+## 解决思路
+  在粗略查看数据集之后，我们发现该数据集存在一些格式问题，因此我们决定首先对数据进行预处理，包括统一格式、进行数据类型的转换等。
+  由于股票价格和交易量等金融数据的明显时序性特征，我们决定采用时序模型进行建模。为了能够在建模时更好地确定时序模型需要的参数，我们首先对处理后的数据进行了初步分析，包括收盘价格图判断数据趋势、绘制季节图判断数据是否存在季节性、进行相关性分析以确定各公司股票价格间的潜在关系等。
+  时序模型我们选择的是ARIMA模型。由于使用该模型进行建模时，数据需要是平稳时间序列且为非白噪音序列，因此在建模之前，我们对所获取的数据进行了平稳序列检测和白噪音检测，并按照检测的结果对数据进行了差分处理，并利用差分后的序列进行建模。
+  由于公司数量较多，且相关性分析表明各公司股票相关性都很强，因此我们对AAPL这只股票的数据进行了详细的建模，对模型进行评估，使用模型进行价格预测并进行相应的分析。
+  最后，我们结合K线图和柱状图，根据上述分析给出相应的建议。
+  需要说明的是，通过查询资料，我们了解到许多投资者和分析师会首选使用收盘价进行分析，因为它代表了一天的最终交易价格，通常被视为当天的市场估值；因此从初步分析到建模，除K线图和柱形图外，我们均使用股票收盘价作为分析对象。
+
+## 解决过程
+### 数据预处理
+```{r 读取数据}
+raw_data<-read.table("./stock.csv",header=TRUE,sep=",")
+summary(raw_data)#检查数据类型
+```
+
+summary显示数据集中，除交易量外，所有数据类型均为字符型。因此，我们首先对处理数据类型，将公司名称转换为因子型、将日期转换为Date类型、将股票价格转换为数值型。
+
+#### 数据类型转换
+```{r 数据处理1-“公司名称”数据类型转换}
+data<-data.frame(matrix(nrow = nrow(raw_data), ncol=ncol(raw_data)))
+# 新建一个空的数据框，用于存储处理后的数据
+colnames(data) <- colnames(raw_data)
+data$Company<-as.factor(raw_data$Company)
+```
+
+```{r 数据处理2-“日期”数据类型转换}
+# 把这一列的“-”都替换成“/”
+raw_data$Date<-gsub("-", "/", raw_data$Date)
+# 日期在表格中的存储样式是：07/17/2023
+data$Date<-as.Date(raw_data$Date, format = "%m/%d/%Y")
+```
+
+```{r 数据处理3-4列价格数据类型转换}
+# 删除"$"符
+raw_data$Close.Last<-gsub("\\$", "", raw_data$Close.Last)
+data$Close.Last<-as.numeric(raw_data$Close.Last)#转换类型
+raw_data$Open<-gsub("\\$", "", raw_data$Open)
+data$Open<-as.numeric(raw_data$Open)
+raw_data$High<-gsub("\\$", "", raw_data$High)
+data$High<-as.numeric(raw_data$High)
+raw_data$Low<-gsub("\\$", "", raw_data$Low)
+data$Low<-as.numeric(raw_data$Low)
+data$Volume<-raw_data$Volume
+
+# 按日期排序
+data<-data[order(data$Date),]
+
+# 再次检查数据类型以及检查是否有空值
+summary(data)
+```
+对初步处理后的数据进行检查，发现数据类型符合预期，数据没有空值。
+
+#### 获取可用于建模的时序数据
+由于我们采用时序模型进行建模，所以需要将用与建模的数据转换为时间序列。因此下面将各个公司的收盘价转换为时间序列类型数据。
+
+```{r 提取各个公司的数据}
+library(zoo)
+# 创建一个连续时间序列
+end_date <- tail(data$Date,n=1)
+start_date <- head(data$Date,n=1)
+all_dates <- seq(start_date, end_date, by = "day")
+#单独取出各个公司的数据进行分析
+data_aapl<-subset(data,Company=="AAPL")
+data_amd<-subset(data,Company=="AMD")
+data_AMZN<-subset(data,Company=="AMZN")
+data_CSCO<-subset(data,Company=="CSCO")
+data_META<-subset(data,Company=="META")
+data_MSFT<-subset(data,Company=="MSFT")
+data_NFLX<-subset(data,Company=="NFLX")
+data_QCOM<-subset(data,Company=="QCOM")
+data_SBUX<-subset(data,Company=="SBUX")
+data_TSLA<-subset(data,Company=="TSLA")
+company_data <- list(
+  data_aapl,
+  data_amd,
+  data_AMZN,
+  data_CSCO,
+  data_META,
+  data_MSFT,
+  data_NFLX,
+  data_QCOM,
+  data_SBUX,
+  data_TSLA
+)#转为List以便遍历
+```
+
+
+```
+由于我们创建的时间序列是从2013年7月18日到2023年7月17日之间的每一天的，而数据集只提供了合法交易日的数据，因此我们利用线性插值得到非交易日的数据并填充至时间序列，以更好地进后续分析。
+
+
+### 初步分析
+为了之后更好地对收盘价数据进行建模，我们针对收盘价，利用线性图、季节图等进行了初步的分析。
+
+#### 趋势分析
+K线图是股票技术分析中常用的图形，能够有效反映股票的走势。
+```{r K线图}
+library(plotly)
+for(i in 1:length(ts_list)){
+p<-plot_ly(company_data[[i]],x=~Date,type="candlestick", open=~Open,close=~Close.Last,
+        high=~High,low=~Low,
+        increasing=list(line=list(color="red")),
+        decreasing=list(line=list(color="green")))
+print(p)
+}
+```
+
+```{r 把各公司的数据转为ts}
+# 建立十年数据
+# library(zoo)
+ts_list<-list()
+for(i in 1:length(company_data)){
+   temp_ts<- ts(data = NA, start = start_date, end = end_date, frequency = 1)
+   date_indices <- match(company_data[[i]]$Date, all_dates)
+   temp_ts[date_indices] <- company_data[[i]]$Close.Last # 注意这里只把收盘价填入了ts
+   temp_ts<-na.approx(temp_ts) # 线性插值
+   ts_list[[length(ts_list) + 1]]<-temp_ts
+}
+```
+由于我们的研究重点是收盘价，因此针对收盘价绘制了时序曲线。
+
+```{r 画收盘价的图}
+library(ggplot2)
+library(pacman)
+library(lubridate)
+library(RColorBrewer)
+fig1_col <- brewer.pal(n = 10, name = "Paired")
+#参考自：https://zhuanlan.zhihu.com/p/35366657
+#画图
+plot(ts_list[[1]], xaxt = "n", main = "各公司的收盘价随时间变化图", xlab = "时间", ylab = "收盘价",col=fig1_col[1],ylim = c(0, 800))#画ts，但先不画出坐标轴
+for(i in 2:length(ts_list))
+{
+  lines(ts_list[[i]], xaxt = "n",col=fig1_col[i])
+}
+
+axis(1, at = seq(start_date- years(1), end_date+ years(1), by = "year"), labels = format(seq(start_date- years(1), end_date+ years(1), by = "year"), "%Y"))#添加年份作为坐标轴
+legend_text <- c("AAPL", "AMD","AMEN","CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA")  # 自定义图例文本
+legend("topleft", legend = legend_text, col = fig1_col[1:length(ts_list)], lty = 1)  # 添加图例，说明每个颜色对应的公司
+```
+我们分析，收盘价的时序图反映出以下特点：
+- 收盘价数据波动较为显著，可能具有上升的趋势；
+- 收盘价涨跌并未表现出明显周期性；
+- 各家公司收盘价具体价格差异较大，但整体走势较为一致，可能具有一定相关性；
+- 多家公司在2018-2023年间的平均股票收盘价明显高于2013-2018年，这两个时间段的数据可能表现出不一样的趋势，因此后续分析时可能需要重新划定训练集，仅截取一段时间内的股票收盘价进行分析。
+
+为了之后能够更好地进行建模，我们继续分析了各家公司股票收盘价的波动性、相关性、季节性。
+
+##### 波动性分析
+```{r 波动性分析}
+for(i in seq_along(company_data)) {
+  target <- company_data[[i]]
+  returns <- diff(log(target$Close.Last))
+  volatility <- sd(returns)
+  
+  print(paste(company_names[[i]], "Volatility:", volatility))
+}
+```
+##### 交易量对比
+```{r 短期交易量对比}
+library(ggplot2)
+ggplot(subset(data,Date>=as.Date("2023-07-01")), aes(x = Date, y = Volume, fill = Company)) +
+  geom_area(stat = "identity", position = "fill")+
+  scale_fill_manual(values = fig1_col)
+```
+##### 相关性分析
+```{r 相关性分析}
+# 载入必要的包
+# install.packages("Hmisc")
+# install.packages("corrplot")
+library(Hmisc)
+library(corrplot)
+library(dplyr)
+
+# 构建数据集合
+all_company_close.last <- data %>%
+  group_by(Date) %>%
+  summarise(
+    AAPL = mean(Close.Last[Company == "AAPL"], na.rm = TRUE),
+    AMD = mean(Close.Last[Company == "AMD"], na.rm = TRUE),
+    AMZN = mean(Close.Last[Company == "AMZN"], na.rm = TRUE),
+    CSCO = mean(Close.Last[Company == "CSCO"], na.rm = TRUE),
+    META = mean(Close.Last[Company == "META"], na.rm = TRUE),
+    MSFT = mean(Close.Last[Company == "MSFT"], na.rm = TRUE),
+    NFLX = mean(Close.Last[Company == "NFLX"], na.rm = TRUE),
+    QCOM = mean(Close.Last[Company == "QCOM"], na.rm = TRUE),
+    SBUX = mean(Close.Last[Company == "SBUX"], na.rm = TRUE),
+    TSLA = mean(Close.Last[Company == "TSLA"], na.rm = TRUE),
+  )
+
+# 反选，选择除了第一列的其他列
+cor_matrix <- 
+  rcorr(as.matrix(all_company_close.last[, -1]))
+
+# 查看相关性矩阵和显著性水平
+cor_matrix$r
+cor_matrix$P
+
+# 相关性可视化
+corrplot(cor_matrix$r,method="pie",type="upper",order="hclust",col=c("darkorange","steelblue"),bg="lightgreen")
+```
+
+结合相关性矩阵和相关性图，我们可以得知各家公司的股票收盘价之间均存在强相关性。我们分析这是由于该数据集的股票均为科技市场股票，同市场下的股票股价变化规律类似。在这样的结论下，我们决定在之后建模的过程中，聚焦于分析针对AAPL股票建立的模型，并将结论类推到其他股票的拟合模型中。
+```{r 股价和股票体量的相关性分析}
+library(Hmisc)
+library(corrplot)
+library(dplyr)
+library(ggplot2)
+for(i in 1:length(company_data))
+{
+  cor_volume_close <- cor(company_data[[i]]$Close,company_data[[i]]$Volume)
+  print(paste(company_data[[i]][1,'Company'],"的收盘价和自身体量的相关性系数为：",cor_volume_close))
+  # print(cor_volume_close)
+}
+```
+发现各家公司的收盘价和自己当天的股票体量基本上没有显著相关性，TSLA的股价和它的体量相关性绝对值只有0.07，因此预测时可以不把体量考虑进去
+
+##### 季节性分析
+我们将每家公司的数据以“月”为单位进行划分，使用该月每日股票收盘价的平均值作为该月的数据，进行季节性分析。
+```{r 季节性分析}
+# library(dplyr)
+# library(zoo)
+# library(lubridate)
+# library(ggplot2)
+# library(forecast) # for ggseasonplot
+for(i in 1:length(ts_list)){
+  # 将 date 列转换为年份和月份
+  temp_df <- mutate(company_data[[i]], Year = lubridate::year(Date), Month = lubridate::month(Date))
+
+  # 使用 dplyr 中的 group_by 和 summarise 函数计算每个月的平均分数
+  monthly_avg <- temp_df %>%
+    group_by(Year, Month) %>%
+    summarise(AvgScore = mean(Close.Last), .groups = 'keep')
+
+  # 将结果转换为时间序列对象
+  data_month <- ts(monthly_avg$AvgScore, start = c(min(monthly_avg$Year), min(monthly_avg$Month)), frequency = 12)
+  p<-ggseasonplot(data_month)
+  print(p)
+}
+```
+从图上可看出，公司股价并未表现出季节性。
+
+## 模型建立
+使用ARIMA模型进行建模时，要求模型为**平稳序列**且为**非白噪音序列**，否则需要首先对数据进行差分等处理，然后再开始建模。
+基于前述分析，我们对各家公司2013年7月18日-2023年7月17日的数据和2019年7月18日-2023年7月17日的数据都进行了分析，以更好地确定训练集。
+
+```{r}
+# 建立五年数据
+start_date_5y <- as.Date("2018-07-18")
+end_date_5y <- as.Date("2023-07-17")
+all_dates_5y <- seq(start_date_5y, end_date_5y, by = "day")
+ts_list_5y <- list()
+
+for(i in 1:length(company_data)){
+    # 选取特定日期范围内的数据
+    data_subset <- subset(company_data[[i]], Date >= start_date_5y & Date <= end_date_5y)
+    temp_ts<- ts(data = NA, start = start_date_5y, end = end_date_5y, frequency = 1)
+    date_indices <- match(data_subset$Date, all_dates_5y)
+    temp_ts[date_indices] <- data_subset$Close.Last
+    temp_ts<-na.approx(temp_ts)
+    ts_list_5y[[length(ts_list_5y) + 1]]<-temp_ts
+}
+```
+
+```
+### 建模条件分析
+#### 平稳性检验
+```{r 平稳性检验-十年}
+library(forecast)
+# library(tseries)
+# library(ggplot2)
+company_names <- c("AAPL", "AMD", "AMZN", "CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA" )
+
+for (i in 1:length(ts_list)) {
+  current.data <- ts_list[[i]]
+  
+  # 保存当前图形参数
+  old_par <- par(no.readonly = TRUE)
+  par(mfrow = c(2, 2), mar = c(2, 3, 5, 0))
+
+  # 绘制时间序列图
+  plot(current.data, main = company_names[i])
+
+  # 绘制ACF和PACF图
+  pacf(current.data, main = "PACF")
+  acf(current.data, main = "short-term ACF")
+
+  # 绘制长期ACF图
+  acf(current.data, lag.max = total_days, main = "Long-term ACF")
+
+  # 恢复旧的图形参数
+  par(old_par)
+  
+  #tsdisplay(current.data)
+  #print(adf.test(current.data))
+}
+```
+
+
+```{r 平稳性检验—五年}
+# 获取五年内的数据
+for (i in 1:length(ts_list_5y)) {
+  current.data <- ts_list_5y[[i]]
+  
+  old_par <- par(no.readonly = TRUE)
+  par(mfrow = c(2, 2), mar = c(2, 3, 5, 0))
+
+  plot(current.data, main = company_names[i])
+  pacf(current.data, main = "PACF")
+  acf(current.data, main = "short-term ACF")
+  acf(current.data, lag.max = total_days, main = "Long-term ACF")
+
+  par(old_par)
+}
+```
+
+无论是五年数据还是十年数据，短期ACF图几乎看不出衰减，长期ACF图可见ACF系数随滞后期的增加而缓慢衰减，最终渐趋趋于0，因此数据具有长期相关性，初步判断序列为非平稳序列。。
+
+为了更准确的判断数据平稳性，下面进行ADF检测。
+```{r ADF分析-十年}
+# library(tseries)
+for (i in 1:length(ts_list)) {
+  current.data <- ts_list[[i]]
+  
+  adf_result <- adf.test(current.data)
+  cat("ADF Test for", company_names[i], ":\n")
+  print(adf_result)
+}
+```
+
+```{r ADF分析-五年}
+for (i in 1:length(ts_list_5y)) {
+  current.data <- ts_list_5y[[i]]
+  
+  adf_result <- adf.test(current.data)
+  cat("ADF Test for", company_names[i], ":\n")
+  print(adf_result)
+}
+```
+
+无论是短期数据还是长期数据，所有公司股票收盘价的ADF测试均显示**p值大于0.05**，因此接受**数据序列不平稳**的假设。为了能够在建模中使用数据，我们判断需要对数据进行差分处理。
+
+#### 差分处理及差分后数据分析
+```{r 差分处理-十年}
+ts_list_diff <- list()
+for (i in seq_along(ts_list)) {
+  ts_list_diff[[i]] <- diff(ts_list[[i]],1)
+  tsdisplay(ts_list_diff[[i]],main=paste("Analysis for",company_names[[i]],"After First Disfference") ,col=fig1_col[i])
+}
+```
+```{r 差分处理-五年}
+ts_list_5y_diff <- list()
+for (i in seq_along(ts_list_5y)) {
+  ts_list_5y_diff[[i]] <- diff(ts_list_5y[[i]],1)
+  tsdisplay(ts_list_5y_diff[[i]],main=paste("Analysis for",company_names[[i]],"After First Disfference") ,col=fig1_col[i])
+}
+```
+
+一阶差分后的序列，自相关性系数及偏自相关系数基本都在0值附近波动，偶尔有超过置信区间的时候，但是滞后阶数非常随机；ACF图中并未表现出周期性。初步判断一阶差分后的序列为平稳序列，无周期性。
+此外，五年数据差分后的序列从数据分布的区间上看比十年数据更为均匀。
+
+```{r 差分后序列ADF测试-十年}
+for (i in 1:length(ts_list_diff)) {
+  current.data <- ts_list_diff[[i]]
+  
+  adf_result <- adf.test(current.data)
+  cat("ADF Test for", company_names[i], ":\n")
+  print(adf_result)
+}
+```
+```{r 差分后数据ADF测试-五年}
+for (i in 1:length(ts_list_5y_diff)) {
+  current.data <- ts_list_5y_diff[[i]]
+  
+  adf_result <- adf.test(current.data)
+  cat("ADF Test for", company_names[i], ":\n")
+  print(adf_result)
+}
+```
+根据ADF测试的结果，可以认定差分后序列为平稳序列。
+下面进行白噪音检验，以验证能否使用差分后序列。
+```{r 白噪音检验—十年}
+for (i in 1:length(ts_list_diff)) {
+  current.data <- ts_list_diff[[i]]
+  
+  box_result <- Box.test(current.data)
+  cat("ADF Test for", company_names[i], ":\n")
+  print(box_result)
+}
+```
+```{r 白噪音检验-五年}
+for (i in 1:length(ts_list_5y_diff)) {
+  current.data <- ts_list_5y_diff[[i]]
+  
+  box_result <- Box.test(current.data,type = "Ljung-Box")
+  cat("ADF Test for", company_names[i], ":\n")
+  print(box_result)
+}
+```
+
+Box-pierce检验表明，除了TSLA，其他公司的股票收盘价在进行一阶差分后是白噪音序列，无法使用。在这种情况下，根据上一步骤中队各家公司股票收盘价相关性的分析，我们决定聚焦于对TSLA的建模，并将该模型用于其他公司股票的预测。
+
+通过上述分析，我们确定了建模时较为合适的*d*值为*1*；一阶差分后，TSLA的ACF图和PACF图整体上看都在13阶后截尾，但实际上只有1、2、6阶时的数据超出虚线较多，因此可尝试*p*为1、2、6、13及*q*为1、2、6的模型。根据初步分析中的季节性分析以及差分后序列的ACF图，我们认为模型无需添加季节差分参数。
+
+### 建模
+```{r 划分测试集和训练集}
+# test_str_date <- as.Date("2023-06-01")
+test_end_date <- as.Date("2023-07-17")
+test_data <- window(ts_list[[10]], start = 19509, end = 19555)
+
+train_data_10y <- window(ts_list[[10]], start = 15904, end = 19508)
+train_data_5y <- window(ts_list[[10]], start = 18905, end = 19508)
+```
+
+
+```{r arima -十年}
+arima(train_data_10y,order=c(1,1,2))#aic = 19774.58
+arima(train_data_10y,order=c(2,1,2))#aic = 19737.59
+arima(train_data_10y,order=c(6,1,2)) #aic = 19699.01
+arima(train_data_10y,order=c(13,1,2)) #aic = 19682.22
+auto.arima(train_data_10y) #ARIMA(4,1,4) ,AIC=19668.04
+```
+
+```{r arima-五年}
+# 可以认为acf图2阶后截尾；pacf图整体上13阶后截尾，1、2、6、13超出虚线较多
+arima(train_data_5y,order=c(1,1,2))# aic = 4197.29
+arima(train_data_5y,order=c(2,1,2))# aic = 4192.57
+arima(train_data_5y,order=c(6,1,2)) # AIC = 4183.74
+arima(train_data_5y,order=c(13,1,2))#aic = 4187.41
+auto.arima(train_data_5y) #ARIMA(3,1,2), AIC = 4185.52
+```
+
+从AIC值上看，以五年数据建模时，模型AIC值明显优于十年数据的模型。使用auto.arima拟合时。模型参数同我们预先估计的相差较大，但从ACF图和PACF图上看，我们认为我们选择的参数更为合理，因此舍弃auto.arima提供的模型。
+对十年数据，我们选择(13,1,2)下的模型；对五年数据，我们选择(6,1,2)下的模型。
+```{r 多元arima-五年}
+#基于前面的相关性分析，我们发现TSLA公司和AAPL公司有较强的相关性，和它自身的体量没有太大相关性
+#所以现在可以取出AAPL公司的相关数据，帮助预测
+aapl_data_5y <- window(ts_list[[1]], start = 18905, end = 19508)
+combined_train<-data.frame(Time = time(train_data_5y), tsla = train_data_5y, aapl = aapl_data_5y)
+fit_multi <- auto.arima(combined_train[,"tsla"], xreg = combined_train[,"aapl"])#指出，要预测的是tsla，参数是aapl
+fit_multi
+tsdisplay(combined_train[,-1])#由图形也能明显看出aapl和tsla的相关性
+tsdisplay(diff(combined_train$tsla))#展示一阶差分后的tsla，指出arima参数取（2,1,2）的合理性
+```
+
+#### 模型评估
+##### 质量评估
+使用R语言的accuracy函数和tsdiag函数对模型进行定量评估。
+```{r }
+fit_10y <- arima(train_data_10y,order=c(13,1,2))
+fit_5y <- arima(train_data_5y,order=c(6,1,2))
+#multi_fit<-arima(train_data_5y,xreg=combined_train$aapl,order=c(2,1,2))
+print("10 year")
+pred <- predict(fit_10y, n.ahead = 47)
+accuracy(pred$pred, test_data)
+#accuracy(fit_10y)
+print("5 year")
+pred <- predict(fit_5y, n.ahead = 47)
+accuracy(pred$pred, test_data)
+print("multi")
+pred <- predict(fit_multi, n.ahead = 47, newxreg = combined_test_data)
+accuracy(pred$pred, test_data)
+
+tsdiag(fit_10y)
+tsdiag(fit_5y)
+tsdiag(fit_multi)
+```
+模型评估中，两种模型的残差自回归系数均为0，Ljung-Box检验的p值均在0.05之上，说明`10年模型`和`5年模型`拟合效果都非常不错。
+
+##### 准确度评估
+使用上述模型预测2023-06-01到2023-07-17之间的股票收盘价，并和真实值进行比较。
+```{r `10年模型`预测情况}
+# library(forecast)
+forecast_10y <- forecast(fit_10y,h=47,level=c(99.5))
+plot(forecast_10y, xlim=c(19000,19555), main = "TSLA收盘价预测图——10年", xlab = "时间", ylab = "收盘价",ylim=c(0,450),xaxt="n")
+lines(forecast_10y$fitted)
+lines(test_data,col="red")
+axis(1, at = seq(end_date - months(20) , end_date, by = "month"),
+labels = format(seq(end_date - months(20), end_date, by = "month"), "%y年%m月"))
+#添加日期作为坐标轴
+```
+
+```{r `5年模型`预测情况}
+# library(forecast)
+forecast_5y <- forecast(fit_5y,h=47,level=c(99.5))
+plot(forecast_5y, xlim=c(19000,19555), main = "TSLA收盘价预测图——5年", xlab = "时间", ylab = "收盘价",ylim=c(0,450),xaxt="n")
+axis(1, at = seq(end_date - months(20) , end_date, by = "month"),
+labels = format(seq(end_date - months(20), end_date, by = "month"), "%y年%m月"))
+lines(forecast_5y$fitted)
+lines(test_data,col="red")
+```
+
+```{r 多元模型预测情况}
+forecast_mul <- forecast(fit_multi, xreg = combined_train$aapl,h=7,level=c(99.5))
+plot(forecast_mul, xlim=c(19000, 19555 ), main = "TSLA收盘价预测图——多元", xlab = "时间", ylab = "收盘价",ylim=c(0,450),xaxt="n",lwd=2)
+axis(1, at = seq(end_date - months(20) , end_date, by = "month"),
+labels = format(seq(end_date - months(20), end_date, by = "month"), "%y年%m月"))
+lines(ts_list[[1]],col=fig1_col[1],lwd=2)
+lines(test_data,col="red",lwd=2)
+legend_text <- c("AAPL", "TSLA")  # 自定义图例文本
+legend("topleft", legend = legend_text, col = c(fig1_col[1],"black"), lty = 1, xpd = TRUE)  # 添加图例，说明每个颜色对应的公司
+
+```
+多元预测的模型效果不够好，在检查过后认为应该不是代码有问题，而是模型存在一定的过拟合，所以它虽然在训练数据上表现较好（有着较低的AIC），但是在测试数据上，真实值甚至没有落在预测的置信区间内。
+
+无论是`10年模型`还是`5年模型`，预测数据均与真实数据相差很大；但从置信区间上看，股票真实值军本落在置信区间内，尤其是`5年模型`，因此还是可以认为模型效果是不错的，且`5年模型`比`10年模型`更优。在后续进行实际预测时，我们可以尝试使用置信区间的范围而非模型实际给出的值做出相关的分析。
+
+#### 挑选潜力股
+由前所述，我们对五年和十年两个时间跨度进行了分析，发现除了TSLA公司以外的公司股票数据都是：（1）不差分时，是非平稳的（2）一阶差分后，是白噪声的。
+那么，如果把时间跨度取小一些，比如只取出一个月的数据、两周的数据，是否数据会变得平稳、容易预测呢？
+在提出这个假设后，我们首先取出各个公司最近一个月的数据，进行观察：
+```{r}
+ts_list_month<-list()
+par(mfrow = c(3, 4))  # 设置分面布局为3行4列
+for(i in 1:10)
+{
+  temp_window_data <- window(ts_list[[i]],start= as.integer(end_date)-30,end=as.integer(end_date))
+  plot(temp_window_data,col=fig1_col[i],main=company_data[[i]][1,"Company"])
+  acf(temp_window_data,lag.max=30,main = "ACF",col=fig1_col[i])
+  ts_list_month[[i]]<-temp_window_data
+  bx_test<-Box.test(ts_list_month[[i]],lag=30)
+  print(paste(company_names[i],"的白噪声检验") )
+  print(bx_test)
+}
+```
+观察发现，大部分公司的数据都是平稳的，而且不是白噪声的，所以可以尝试对每个公司使用arima方式建模
+```{r auto.arima}
+library(lubridate)
+library(forecast)
+#par(mfrow = c(1,2))  #分面以后感觉显示效果不太好
+predict_month<-list()
+for(i in 1:10)
+{
+  temp_model=auto.arima(ts_list_month[[i]])
+  model.pl=forecast(temp_model,h=7,level=c(99.5))#预测之后的7天，置信度为99.5
+  predict_month[[i]]<-model.pl$mean#把预测出的内容放进predict_month
+}
+# model.pl=forecast(fit_5y,h=7,level=c(99.5))
+# predict_month[[10]]<-model.pl$mean#把预测出的内容放进predict_month
+plot(x=NULL,y=NULL,xlim=c(end(ts_list[[i]])[1]+1, end(ts_list[[i]])[1]+7),ylim=c(0,600),main="之后7天的股价预测图",xlab="时间",ylab="预测收盘价",xaxt="n")
+for(i in 1:length(predict_month)){
+  lines(predict_month[[i]], col = fig1_col[i],lwd=2)
+}
+axis(1, at = seq(end_date +days(1) , end_date +days(7), by = "day"), labels = format( seq(end_date +days(1) , end_date +days(7), by = "day"), "%m/%d"))#添加日期作为坐标轴
+legend_text <- c("AAPL", "AMD","AMEN","CSCO","META","MSFT","NFLX","QCOM","SBUX","TSLA")  # 自定义图例文本
+legend("topleft", legend = legend_text, col = fig1_col[1:length(predict_month)], lty = 1, xpd = TRUE)  # 添加图例，说明每个颜色对应的公司
+
+for(i in 1:length(predict_month))
+{
+  last_close<-tail(as.vector(ts_list[[i]]), n = 1)#取出最后一天的收盘价
+  #print(last_close)
+  for(j in 1:7)#对7天的预测值都减去初始值
+  {
+    predict_month[[i]][j]=predict_month[[i]][j]-last_close#计算之后7天的增量
+  }
+  print(paste(company_names[i],"的预测股价增量：",predict_month[[i]][7]))
+}
+plot(x=NULL,y=NULL,xlim=c(end(ts_list[[i]])[1]+1, end(ts_list[[i]])[1]+7),ylim=c(-10,10),main="之后7天的股价增量图",xlab="时间",ylab="预测增量",xaxt="n")
+for(i in 1:length(predict_month)){
+  lines(predict_month[[i]], col = fig1_col[i],lwd=2)
+}
+legend("topleft", legend = legend_text, col = fig1_col[1:length(predict_month)], lty = 1, xpd = TRUE)  # 添加图例，说明每个颜色对应的公司
+axis(1, at = seq(end_date +days(1) , end_date +days(7), by = "day"), labels = format( seq(end_date +days(1) , end_date +days(7), by = "day"), "%m/%d"))#添加日期作为坐标轴
+```
+
+##### 扩展：其他技术分析
+经过前述分析，我们无法通过ARIMA模型进行预测，从而筛选出潜力股，因此我们改用股票分析中的常用的技术方法，通过分析各家公司股票的移动平均线(MA)、相对移动指数(RSI)、布林带(Bollinger Brands)。其中，由于布林带本身会包含移动平均线数据，故仅对布林带、相对移动平均指数进行分析。
+此处我们在不进行线性插值的情况下取数据集中最近的15天数据，重新建立时序序列。
+
+【补充】
+相对强弱指数（Relative Strength Index，简称RSI）是一种动量振荡器，用于衡量股票价格的最近涨跌动力，以评估股票或其他金融资产是过度买入（overbought）还是过度卖出（oversold）的状况。
+RSI值超过70：通常被认为股票或资产处于过度买入状态。这可能意味着价格短期内可能会下跌，一些交易者可能会考虑卖出或减仓。
+RSI值低于30：通常被认为股票或资产处于过度卖出状态。这可能意味着价格短期内可能会上涨，一些交易者可能会考虑买入或加仓。
+
+布林带（Bollinger Bands，简称BBands）是一种在金融技术分析中常用的工具，主要用于衡量市场的波动性和确定股票价格的相对高低位置
+其组成为：
+中线（mavg）：通常是股票价格的简单移动平均线（SMA），用于表示价格的中期趋势。它是布林带的基准线。
+上带（up）：表示中线上方的一个标准差范围。它是通过在中线的基础上加上两倍的股票价格的标准差来计算的。上带可以被视为价格的上限或阻力位。
+下带（dn）：表示中线下方的一个标准差范围。它是通过在中线的基础上减去两倍的股票价格的标准差来计算的。下带可以被视为价格的下限或支撑位。
+百分比带宽（pctB）：这是一个指标，用于显示价格相对于布林带的位置。其计算公式为：(价格 - 下带) / (上带 - 下带)。pctB的值范围在0到1之间，其中接近0表示价格接近下带，接近1表示价格接近上带。
+```{r 构建时序序列}
+#install.packages("xts")
+#install.packages("quantmod")
+library(xts)
+library(quantmod)
+
+# 为每个公司创建一个xts对象；存放的是最近15个交易日的数据
+xts_list <- list()
+
+for(i in seq_along(company_data)) {
+  
+  # 选取特定公司的数据
+  data <- company_data[[i]]
+
+  # 选取相关列并创建xts对象
+  # data$Date <- as.Date(data$Date)
+  xts_data <- xts(data[, c("Open", "High", "Low", "Close.Last", "Volume")],
+                  order.by = data$Date)
+
+  # 添加到列表
+  xts_list[[i]] <- window(xts_data,start = "2023-06-26",end = "2023-07-17")
+}
+
+```
+
+```{r RSI分析}
+# 获得RSI数据
+rsi_values <- sapply(xts_list, function(data) {
+  rsi <- RSI(Cl(data), n=14)  # 计算14天的RSI
+  mean(rsi, na.rm = TRUE)  # 取平均RSI值
+})
+
+# 绘制柱状图
+# library(ggplot2)
+
+# 准备数据框
+rsi_df <- data.frame(Company=company_names, RSI=rsi_values)
+
+# 绘制柱状图
+ggplot(rsi_df, aes(x=Company, y=RSI, fill=Company)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_hline(yintercept=70, linetype="dashed", color="red", size=1) +
+  geom_hline(yintercept=30, linetype="dashed", color="blue", size=1) +
+  geom_text(aes(label=round(RSI, 2)), vjust=-0.3, color="black", size=3.5) + 
+  scale_fill_manual(values=fig1_col)+  # 不同颜色
+  labs(title="RSI Values of Companies", x="Company", y="RSI") +
+  theme_minimal()
+
+```
+
+可以看到，特征最为明显的是特斯拉和CISCO，短期内我们可认为特斯拉公司非常受市场追捧，Netflix
+、Meta、AMD、AAPL也很受市场青睐，CISCO、QCOM、SBUX、AMAZN的情况较为稳定。短期内潜力股可考虑特斯拉、网飞、META、AMD、苹果；而长期内，考虑到当前过度买入的股票可能出现的价格回落，我们可以着眼于其他几家公司。
+```{r 布林带分析-获得计算值}
+bbands_averages <- lapply(xts_list, function(data) {
+  bbands <- BBands(Cl(data), n=15, sd=2)
+  avg_up <- mean(bbands$up, na.rm = TRUE)
+  avg_dn <- mean(bbands$dn, na.rm = TRUE)
+  avg_mavg <- mean(bbands$mavg, na.rm = TRUE)
+  avg_pctB <- mean((Cl(data) - bbands$dn) / (bbands$up - bbands$dn), na.rm = TRUE)
+  
+  return(c(avg_up, avg_mavg, avg_dn, avg_pctB))
+})
+bbands_df <- do.call(rbind, bbands_averages)
+colnames(bbands_df) <- c("Up", "Mavg", "Dn", "PctB")
+bbands_df <- data.frame(Company = company_names, bbands_df)
+
+```
+
+```{r 布林带分析-绘制图表}
+ggplot(bbands_df, aes(x = Company, fill = Company)) +
+  geom_tile(aes(y = (Up + Dn) / 2, height = Up - Dn, width = 0.7)) +
+  geom_point(aes(y = Mavg), shape = 95, size = 5) +
+  geom_text(aes(y = Up + 0.05, label = paste("PctB:", round(PctB, 2))), 
+            position = position_dodge(0.9), vjust = 0, size = 3) +
+  labs(title = "Average Bollinger Bands of Companies", x = "Company", y = "Value") +
+  scale_fill_manual(values=fig1_col) +
+  theme_minimal()
+```
+布林带的PctB值显示波动较大的公司为TSLA、NFLX、META、MSFT，波动较小的几家公司为CISCO、SBUX、AMD、AMAZON、QCOM、苹果、SBUX
+两种数据分析时，被过度买入且PctB值较高的股票是当前发展势头非常好的股票，但在不久的将来可能会面临价格的回调；被过度卖出且PctB值较低的股票是当前发展势头没有很好的股票，但在不久的将来可能会面临价格的回升；RSI值在正常区间的股票是发展比较稳定的股票，尽管后续会有价格上的波动，但整体情况还是以稳定为主。
+因此，基于这两种分析，在短期内我们更看好TSLA、NFLX、META这几家公司。
+
+##### 波动性分析
+```{r 波动性分析}
+for(i in seq_along(company_data)) {
+  target <- company_data[[i]]
+  returns <- diff(log(target$Close.Last))
+  volatility <- sd(returns)
+  
+  print(paste(company_names[[i]], "Volatility:", volatility))
+}
+```
+对各公司股票收盘价进行波动性分析，发现日波动性均在4%以内；但TSLA、AMD公司的波动性明显高于其他公司
+
+##### 交易量对比
+```{r 短期交易量对比}
+library(ggplot2)
+ggplot(subset(data,Date>=as.Date("2023-07-01")), aes(x = Date, y = Volume, fill = Company)) +
+  geom_area(stat = "identity", position = "fill")+
+  scale_fill_manual(values = fig1_col)
+```
+从交易量的对比图中，我们可以看出当前市场的划分状况。特斯拉、苹果、AMD、亚马逊在市场份额上有非大的优势。
+
+## 分析与建议
+  从模型的检测结果来看，我们最终建立的ARIMA模型的AIC值较低，残差检验结果非常优秀。这说明针对我们所选择的数据，模型呈现出的效果是非常好的；然而从测试集结果来看，该模型预测值与实际值偏差非常大，模型给出的测试结果并不可信。
+  但我们认为，投资者在物色投资对象时，了解一家公司是否有增长潜力比获得一个看似确切但实际并不确定的“股票价格”更为重要。因此，尽管股价预测的结果是不够准确的，其反映出的趋势却是十分有用的。
+  因此，我们给出如下的建议：
+  
+  - 从趋势上看，xxx家公司具有更大的增长潜力，建议投资者着重考虑这家公司。
+  
+  - 单纯通过股票的价格走势来确定潜在投资对象也许不是很明智的选择。技术分析的结果对短期投资更有效，然后若想长期投资，还是应该对公司进行基本面分析，并结合该公司其他方面的表现（如公司领导人决策力、公司氛围登）予以综合考虑。
+
+
+## 总结
+- 模型拟合效果较差的原因
+
